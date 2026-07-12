@@ -1,6 +1,6 @@
 /*!
- * table-validation v1.0.0 — hand-authored TypeScript declarations for the Browser JS
- * profile (Core Specification v1.0.0 + Authoring, Ingestion & Inference Addendum v1.0.0).
+ * table-validation v1.1.0 — hand-authored TypeScript declarations for the Browser JS
+ * profile (Core Specification v1.1.0 + Authoring, Ingestion & Inference Addendum v1.1.0).
  * The runtime is a single IIFE exposing one global, `TableValidation`; these
  * declarations describe that global. No build step — this file is authored by hand,
  * kept in lockstep with dist/table-validation.js, and served from the same CDN tag.
@@ -553,6 +553,8 @@ declare namespace TableValidation {
         sampleRows?: number;
         name?: string;
         suggestRanges?: boolean;
+        /** §C.7 (1.1.0): draft observed decimal-precision bounds on float columns. Default TRUE. */
+        suggestPrecision?: boolean;
         seedComparison?: boolean;
         /** §C.4 step 5: draft every accepting temporal candidate; union coverage for mixed columns. */
         allAcceptingFormats?: boolean;

@@ -131,7 +131,7 @@
             return errs;
         }
         if (!deepEqual(r1, r2)) errs.push('determinism: two identical runs produced different results');
-        if (r1.specVersion !== '1.0.0') errs.push(`specVersion: expected "1.0.0", got ${r1.specVersion}`);
+        if (r1.specVersion !== TableValidation.SPEC_VERSION) errs.push(`specVersion: expected "${TableValidation.SPEC_VERSION}", got ${r1.specVersion}`);
         partialMatch(expect, r1, label ? `result(${label})` : 'result', errs);
         return errs;
     }

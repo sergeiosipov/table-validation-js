@@ -74,6 +74,7 @@
         <label class="inline">sampleRows <input id="optSample" type="text" class="narrow" value="1000"></label>
         <label class="inline"><input id="optAllFmt" type="checkbox" checked> all accepting formats</label>
         <label class="inline"><input id="optRanges" type="checkbox"> suggest ranges</label>
+        <label class="inline" title="Draft observed decimal-precision bounds on float columns (default on — decimal places are contract-like)"><input id="optPrec" type="checkbox" checked> suggest precision</label>
         <label class="inline"><input id="optSeedCmp" type="checkbox"> seed comparison</label>
         <label class="inline"><input id="optReports" type="checkbox" checked> include inference reports in the ZIP</label>
         <div class="hint">“all accepting formats” drafts every accepting temporal format (union coverage
@@ -102,8 +103,8 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"
         integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
         crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.0.0/dist/table-validation.js"
-        integrity="sha384-6Qg+Z7kzn+QhKYSzKRnoKakG5EI+gJLbXOyJV6JkAlGk251M30BTur4L3QJpI/KA"
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.1.0/dist/table-validation.js"
+        integrity="sha384-ciDfSszNj9gSwXo3ZI824IL4hSOYPnPftazTkq/Jm54jQFpSTDiDGTN8HbVYw8Hh"
         crossorigin="anonymous"></script>
 <script>
 'use strict';
@@ -168,6 +169,7 @@
                 name: stemOf(e.relPath).split('/').pop() || 'inferred-config',
                 sampleRows: parseInt($('optSample').value, 10) || 1000,
                 suggestRanges: $('optRanges').checked,
+                suggestPrecision: $('optPrec').checked,
                 seedComparison: $('optSeedCmp').checked,
                 allAcceptingFormats: $('optAllFmt').checked,
             });
@@ -214,7 +216,8 @@
                 header: $('optHeader').value, skipRows: $('optSkip').value, skipFooterRows: $('optFooter').value,
                 delimiter: $('optDelim').value, encoding: $('optEnc').value, sheet: $('optSheet').value,
                 sampleRows: $('optSample').value, allAcceptingFormats: $('optAllFmt').checked,
-                suggestRanges: $('optRanges').checked, seedComparison: $('optSeedCmp').checked,
+                suggestRanges: $('optRanges').checked, suggestPrecision: $('optPrec').checked,
+                seedComparison: $('optSeedCmp').checked,
             },
             files: [],
         };

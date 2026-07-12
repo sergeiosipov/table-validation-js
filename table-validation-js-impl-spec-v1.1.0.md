@@ -1,10 +1,10 @@
 # Table Validation Engine — Browser JS Implementation Specification
 
-## Document Version: 1.0.0
+## Document Version: 1.1.0
 
-> **Document set.** This document defines the **Browser JS profile** of the *Table Validation Library — Core Specification v1.0.0* (the "Core Spec") and of its *Authoring, Ingestion & Inference Addendum v1.0.0* (the "Addendum", Core Spec §16). All validation and comparison behavior — pipeline, rules, semantics, result structure — is defined there and is not restated here. This document binds the host capabilities of Core Spec §1.6, defines the concrete public API (validation, comparison, and the tooling modules), and specifies packaging and CDN publishing. The doc version, `TableValidation.VERSION`, `TableValidation.SPEC_VERSION`, and the `specVersion` field emitted in every result share **one unified number** (§7.3).
+> **Document set.** This document defines the **Browser JS profile** of the *Table Validation Library — Core Specification v1.1.0* (the "Core Spec") and of its *Authoring, Ingestion & Inference Addendum v1.1.0* (the "Addendum", Core Spec §16). All validation and comparison behavior — pipeline, rules, semantics, result structure — is defined there and is not restated here. This document binds the host capabilities of Core Spec §1.6, defines the concrete public API (validation, comparison, and the tooling modules), and specifies packaging and CDN publishing. The doc version, `TableValidation.VERSION`, `TableValidation.SPEC_VERSION`, and the `specVersion` field emitted in every result share **one unified number** (§7.3).
 
-An implementation is conformant to this profile iff it (a) satisfies every normative requirement of the Core Spec v1.0.0, (b) exposes the API and bindings defined here, and (c) binds all three optional modules of the Addendum (`authoring`, `ingestion`, `inference` — Addendum §D) via §3.11–§3.13. The published artifact `dist/table-validation.js` implements this profile in full (§7.3).
+An implementation is conformant to this profile iff it (a) satisfies every normative requirement of the Core Spec v1.1.0, (b) exposes the API and bindings defined here, and (c) binds all three optional modules of the Addendum (`authoring`, `ingestion`, `inference` — Addendum §D) via §3.11–§3.13. The published artifact `dist/table-validation.js` implements this profile in full (§7.3).
 
 ---
 
@@ -89,7 +89,7 @@ Load order (Luxon before the engine if temporal columns are used; ExcelJS any ti
 ```html
 <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js"></script> <!-- optional -->
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation@v1.0.0/dist/table-validation.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.1.0/dist/table-validation.js"></script>
 <!-- or a plain local copy: <script src="dist/table-validation.js"></script> -->
 ```
 
@@ -333,7 +333,7 @@ TableValidation.TableValidationConfigError   // Error subclass; name "TableValid
 TableValidation.TableValidationIngestError   // Error subclass; name "TableValidationIngestError" (§3.12)
 ```
 
-`VERSION` and `SPEC_VERSION` are the **same string** (§7.3): the library, the spec it implements, and the `specVersion` stamped on every result all move together. The published artifact reports `"1.0.0"`.
+`VERSION` and `SPEC_VERSION` are the **same string** (§7.3): the library, the spec it implements, and the `specVersion` stamped on every result all move together. The published artifact reports `"1.1.0"`.
 
 Rule of thumb: **thrown/rejected = you called the API wrong; violations (and aborts) in the result = the schema or data is wrong.** `TableValidationConfigError` is still *caller-error only*; it did **not** absorb the former `halt` behavior — schema-content problems and intrinsic aborts (`abortReason`) live in the result, not in a thrown error. `TableValidationIngestError` is the one deliberate exception to this rule, forced by the ingestion contract: `ingest()`'s product *is the table* — when it cannot be produced (unreadable source, format mismatch, limit exceeded) there is no result to carry a violation, so the fatal condition is a rejection carrying the Addendum §B.7 canonical `code` ([§3.12](#312-tablevalidationingest)).
 
@@ -424,7 +424,7 @@ TableValidation.inferConfig(table, options?) → { draft, report }   // synchron
 ```
 
 - `table` — a `TableInput` (Core Spec §1.5), typically `ingest()` output. Not mutated.
-- `options` — `{ sampleRows = 1000, name = "inferred-config", suggestRanges = false, seedComparison = false }` (defaults and rules N2–N3, Addendum §C.10).
+- `options` — `{ sampleRows = 1000, name = "inferred-config", suggestRanges = false, suggestPrecision = true, seedComparison = false, allAcceptingFormats = false }` (defaults and rules N2–N3, Addendum §C.10; `suggestPrecision` added in 1.1.0 — drafts observed decimal-precision bounds on float columns, decoupled from `suggestRanges`).
 - `draft` is a schema JSON that **passes Phase 1 by construction** (rule N1) and is directly loadable into `createConfigBuilder(draft)` — infer → edit → validate is one flow. `report` is the Addendum §C.8 `InferenceReport` (per-column confidence `high`/`ambiguous`/`fallback`, ranked alternatives, observed evidence, candidate keys, report-only tolerance suggestions).
 - **Temporal ladder step 5 requires Luxon**: when the `luxon` global is absent the step is skipped entirely (temporal-looking columns fall through to `string`) and `report.limitations` records `"temporalDisabled:luxon"` — deterministic for that binding set (Addendum §C.9), never a throw.
 - Everything else is dependency-free and pure; two calls with the same `(table, options)` return deep-equal results.
@@ -435,7 +435,7 @@ TableValidation.inferConfig(table, options?) → { draft, report }   // synchron
 `dist/table-validation-worker.js` is a small hand-authored **classic worker** script (CDN-fetchable from the same tag). It `importScripts('table-validation.js')` from its own directory at startup and proxies the four heavy entry points over `postMessage`.
 
 ```javascript
-const w = new Worker('https://cdn.jsdelivr.net/gh/<owner>/table-validation@v1.0.0/dist/table-validation-worker.js');
+const w = new Worker('https://cdn.jsdelivr.net/gh/<owner>/table-validation-js@v1.1.0/dist/table-validation-worker.js');
 w.postMessage({ id: 1, op: 'validate', args: [schema, table, { referenceInstant }] });
 w.onmessage = (ev) => { /* ev.data = { id: 1, ok: true, result } */ };
 ```
@@ -629,15 +629,15 @@ CDN publishing is possible and is the intended distribution channel. You do not 
 jsDelivr serves files straight from GitHub tags; no npm, no node, no registration:
 
 ```
-https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation@v1.0.0/dist/table-validation.js
+https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.1.0/dist/table-validation.js
 ```
 
 Release procedure (git only):
 
 ```bash
 git add dist/table-validation.js README.md test/
-git commit -m "release v1.0.0"
-git tag v1.0.0
+git commit -m "release v1.1.0"
+git tag v1.1.0
 git push --follow-tags
 ```
 
@@ -652,8 +652,8 @@ Only available from an environment that has npm. Any public npm package is autom
 ```json
 {
     "name": "@yourscope/table-validation",
-    "version": "1.0.0",
-    "description": "Schema-driven table validation & comparison engine (Core Spec 1.0.0, Browser JS profile)",
+    "version": "1.1.0",
+    "description": "Schema-driven table validation & comparison engine (Core Spec 1.1.0, Browser JS profile)",
     "license": "MIT",
     "files": ["dist", "README.md"],
     "main": "dist/table-validation.js",
@@ -665,11 +665,11 @@ Only available from an environment that has npm. Any public npm package is autom
 }
 ```
 
-The `unpkg`/`jsdelivr` fields set the default file served for extension-less URLs. Release: `npm version 1.0.0 && npm publish --access public && git push --follow-tags`. Resulting URLs:
+The `unpkg`/`jsdelivr` fields set the default file served for extension-less URLs. Release: `npm version 1.1.0 && npm publish --access public && git push --follow-tags`. Resulting URLs:
 
 ```
-https://cdn.jsdelivr.net/npm/@yourscope/table-validation@1.0.0/dist/table-validation.js
-https://unpkg.com/@yourscope/table-validation@1.0.0/dist/table-validation.js
+https://cdn.jsdelivr.net/npm/@yourscope/table-validation@1.1.0/dist/table-validation.js
+https://unpkg.com/@yourscope/table-validation@1.1.0/dist/table-validation.js
 ```
 
 npm gives you a manifest, semver ranges, and provenance — use this route when an npm-capable environment is available. The same immutability rule applies: never republish changed content under the same version.
@@ -677,8 +677,8 @@ npm gives you a manifest, semver ranges, and provenance — use this route when 
 ### 7.3 Versioning & Pinning Policy
 
 - **Unified version.** The unified number names the **specification set**; a library release adopts it when — and only when — it implements that set. `VERSION === SPEC_VERSION` in every release, and every result stamps that number as `specVersion`. A profile release therefore always states exactly which Core Spec it implements; there is no separate library-semver track to reconcile.
-- **Version vs. artifact.** The version applies to a release only when the artifact actually implements the spec set. `dist/table-validation.js` implements this document in full and reports `VERSION === SPEC_VERSION === "1.0.0"`.
-- **Consumers SHOULD pin exact versions in production** (e.g. `@1.0.0` for the current artifact). Range URLs (`@1`, `@1.0`) exist on jsDelivr and auto-track releases — convenient for prototypes, but they defeat integrity checking and reproducibility.
+- **Version vs. artifact.** The version applies to a release only when the artifact actually implements the spec set. `dist/table-validation.js` implements this document in full and reports `VERSION === SPEC_VERSION === "1.1.0"`.
+- **Consumers SHOULD pin exact versions in production** (e.g. `@1.1.0` for the current artifact). Range URLs (`@1`, `@1.0`) exist on jsDelivr and auto-track releases — convenient for prototypes, but they defeat integrity checking and reproducibility.
 - Schemas remain portable across releases implementing the same Core Spec MAJOR (Core Spec §1.6).
 
 ### 7.4 Subresource Integrity
@@ -692,7 +692,7 @@ $h = [System.Security.Cryptography.SHA384]::Create().ComputeHash([IO.File]::Read
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation@v1.0.0/dist/table-validation.js"
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.1.0/dist/table-validation.js"
         integrity="sha384-<hash>" crossorigin="anonymous"></script>
 ```
 
@@ -705,10 +705,10 @@ Validate a raw CSV feed (headerless) and export the annotated workbook:
 ```html
 <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation@v1.0.0/dist/table-validation.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.1.0/dist/table-validation.js"></script>
 <script>
 const schema = {
-    meta: { schemaVersion: "1.0.0", name: "deliveries" },
+    meta: { schemaVersion: "1.1.0", name: "deliveries" },
     resultConfig: { collectCellRegister: true },
     nullHandling: { nullEquivalents: ["", "NA"] },
     evaluation: { strictType: false, timezone: "Europe/Luxembourg" },
@@ -755,7 +755,7 @@ Compare a produced feed against a known-good reference and export the comparison
 ```html
 <script>
 const cmpSchema = {
-    meta: { schemaVersion: "1.0.0", name: "deliveries-compare" },
+    meta: { schemaVersion: "1.1.0", name: "deliveries-compare" },
     resultConfig: { collectCellRegister: true },
     evaluation: { strictType: false, timezone: "utc" },
     columns: {

@@ -242,4 +242,117 @@
             assertEq(result.specVersion, TV().SPEC_VERSION, 'result stamps the unified version');
         },
     });
+
+    // ---------------- v1.1.0: real-world dates & float precision ----------------
+
+    U.push({
+        suite, name: 'unpadded d/M tokens (1.1.0): d.M.yyyy infers high-confidence; padded columns unchanged',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            // mixed padded/unpadded: only the unpadded twin accepts everything -> sole
+            // accepter after twin reduction -> HIGH confidence, no alternatives
+            const mixed = { headers: ['d'], rows: [['1.7.2026'], ['15.07.2026'], ['3.12.2026']] };
+            const r = TV().inferConfig(mixed);
+            assertEq(r.report.columns[0].inferredType, 'date', 'unpadded column infers date');
+            assertEq(r.draft.columns.d.type.formats, ['d.M.yyyy'], 'unpadded format drafted');
+            assertEq(r.report.columns[0].confidence, 'high', 'sole accepter after twin reduction');
+            assertEq(r.report.columns[0].alternatives, [], 'no alternatives');
+            assertN1(assert, r.draft, 'unpadded');
+            assert(TV().validate(r.draft, mixed).valid, 'the draft validates its own sample');
+            // all-padded column: byte-identical to 1.0.0 -- padded winner, high, no
+            // unpadded twin leaking in as an alternative
+            const padded = { headers: ['d'], rows: [['15.07.2026'], ['03.12.2026']] };
+            const rp = TV().inferConfig(padded);
+            assertEq(rp.draft.columns.d.type.formats, ['dd.MM.yyyy'], 'padded winner unchanged');
+            assertEq(rp.report.columns[0].confidence, 'high', 'still high');
+            assertEq(rp.report.columns[0].alternatives, [], 'twin reduced away, not listed');
+            // unpadded slash dates keep the classic dd/MM-vs-MM/dd honesty at the
+            // unpadded level, without listing padded twins
+            const slash = { headers: ['d'], rows: [['1/2/2026'], ['3/4/2026']] };
+            const rs = TV().inferConfig(slash);
+            assertEq(rs.draft.columns.d.type.formats, ['d/M/yyyy'], 'unpadded slash winner (candidate order)');
+            assertEq(rs.report.columns[0].confidence, 'ambiguous', 'd/M vs M/d stays honest');
+            assertEq(rs.report.columns[0].alternatives, [{ type: 'date', formats: ['M/d/yyyy'], rank: 1 }],
+                'the other unpadded reading is the alternative');
+        },
+    });
+
+    U.push({
+        suite, name: 'new padded candidates (1.1.0): dd-MM-yyyy, yyyy/MM/dd, dd/MM/yyyy HH:mm',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            const dash = TV().inferConfig({ headers: ['d'], rows: [['15-07-2026'], ['03-12-2026']] });
+            assertEq(dash.draft.columns.d.type.formats, ['dd-MM-yyyy'], 'dash dates infer');
+            const ymd = TV().inferConfig({ headers: ['d'], rows: [['2026/07/15'], ['2026/12/03']] });
+            assertEq(ymd.draft.columns.d.type.formats, ['yyyy/MM/dd'], 'slash ISO order infers');
+            assertEq(ymd.report.columns[0].confidence, 'high', 'unambiguous');
+            const dt = TV().inferConfig({ headers: ['t'], rows: [['15/07/2026 14:30'], ['16/07/2026 09:05']] });
+            assertEq(dt.report.columns[0].inferredType, 'datetime', 'slash datetime infers');
+            assertEq(dt.draft.columns.t.type.formats, ['dd/MM/yyyy HH:mm'], 'day 15 disambiguates dd/MM from MM/dd');
+            assertN1(assert, dt.draft, 'slash-datetime');
+        },
+    });
+
+    U.push({
+        suite, name: 'digit-date guard (1.1.0): yyyyMMdd int columns carry a ranked date alternative',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            const t = { headers: ['d'], rows: [['20260715'], ['20260101'], ['20251231']] };
+            const r = TV().inferConfig(t);
+            assertEq(r.report.columns[0].inferredType, 'int', 'ladder order unchanged -- int still wins');
+            assertEq(r.report.columns[0].confidence, 'ambiguous', 'no longer silently confident');
+            assertEq(r.report.columns[0].reasons, ['digitDate'], 'reason recorded');
+            assertEq(r.report.columns[0].alternatives, [{ type: 'date', formats: ['yyyyMMdd'], rank: 1 }],
+                'the date reading is the rank-1 alternative');
+            assertN1(assert, r.draft, 'digitDate');
+            // 8 digits that are NOT a calendar date: plain int, high, no alternative
+            const ids = TV().inferConfig({ headers: ['d'], rows: [['12345678'], ['87654321']] });
+            assertEq(ids.report.columns[0].confidence, 'high', 'non-date 8-digit ids stay high');
+            assertEq(ids.report.columns[0].alternatives, [], 'no false date alternative');
+            // non-8-digit ints untouched
+            const plain = TV().inferConfig({ headers: ['d'], rows: [['1001'], ['1002']] });
+            assertEq(plain.report.columns[0].confidence, 'high', 'ordinary ints untouched');
+        },
+    });
+
+    U.push({
+        suite, name: 'suggestPrecision (1.1.0): default on, decoupled from suggestRanges, and it bites',
+        fn: ({ assert, assertEq }) => {
+            const t = { headers: ['amt'], rows: [['10.50'], ['3.25'], ['7.00']] };
+            const r = TV().inferConfig(t);
+            assertEq(r.draft.columns.amt.type.precision,
+                { min: 2, max: 2, minInclusive: true, maxInclusive: true }, 'precision drafted by default');
+            assertEq(r.draft.columns.amt.type.value, undefined, 'value ranges still off by default');
+            assertN1(assert, r.draft, 'precision-default');
+            const off = TV().inferConfig(t, { suggestPrecision: false });
+            assertEq(off.draft.columns.amt.type.precision, undefined, 'opt-out honored');
+            const ranges = TV().inferConfig(t, { suggestRanges: true, suggestPrecision: false });
+            assertEq(ranges.draft.columns.amt.type.value,
+                { min: 3.25, max: 10.5, minInclusive: true, maxInclusive: true }, 'ranges draftable alone');
+            assertEq(ranges.draft.columns.amt.type.precision, undefined, 'suggestRanges no longer drags precision in');
+            // the drafted constraint actually catches a precision breach
+            const run = TV().validate(r.draft, { headers: ['amt'], rows: [['10.505']] });
+            assert(!run.valid, 'a 3-decimal value violates the drafted 2-decimal contract');
+            // mixed 0..2 decimals draft the observed spread, not a guess
+            const spread = TV().inferConfig({ headers: ['amt'], rows: [['10'], ['3.2'], ['7.25']] });
+            assertEq(spread.draft.columns.amt.type.precision,
+                { min: 0, max: 2, minInclusive: true, maxInclusive: true }, 'observed bounds exactly');
+        },
+    });
+
+    U.push({
+        suite, name: 'rule 21/48 (1.1.0): d/M tokens legal with component coverage enforced',
+        fn: ({ assert, assertEq }) => {
+            const ok = TV().createConfigBuilder({ meta: { schemaVersion: '1.1.0', name: 'x' },
+                columns: { c: { type: { name: 'date', formats: ['d.M.yyyy'] } } } }).validate();
+            assert(ok.valid, 'd.M.yyyy is a valid date format: ' + JSON.stringify(ok.errors));
+            const noYear = TV().createConfigBuilder({ meta: { schemaVersion: '1.1.0', name: 'x' },
+                columns: { c: { type: { name: 'date', formats: ['d.M'] } } } }).validate();
+            assert(!noYear.valid, 'd.M without a year still fails component coverage');
+            const dInTime = TV().createConfigBuilder({ meta: { schemaVersion: '1.1.0', name: 'x' },
+                columns: { c: { type: { name: 'time', formats: ['d HH:mm'] } } } }).validate();
+            assert(!dInTime.valid, 'a day token in a time format is still rejected');
+        },
+    });
+
 })();

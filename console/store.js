@@ -57,7 +57,7 @@
             // persisted (localStorage untouched), never exported, and the mode is off
             // after every reload — the security posture is deliberate.
             advanced: { enabled: false, sources: [] },   // sources: [{ name, src }]
-            inference: { status: 'idle', offer: null, options: { sampleRows: 1000, suggestRanges: false, seedComparison: false, allAcceptingFormats: false } },
+            inference: { status: 'idle', offer: null, options: { sampleRows: 1000, suggestRanges: false, suggestPrecision: true, seedComparison: false, allAcceptingFormats: false } },
             run: {
                 status: 'idle', mode: null, viaWorker: false,
                 previous: null,          // last completed run { result, report, mode } — feeds the Δ view
@@ -581,8 +581,8 @@
                     const o = st.inference.options;
                     st.inference.offer = TV().inferConfig(t, {
                         name: (st.authoring.doc.meta && st.authoring.doc.meta.name) || 'inferred-config',
-                        sampleRows: o.sampleRows, suggestRanges: o.suggestRanges, seedComparison: o.seedComparison,
-                        allAcceptingFormats: o.allAcceptingFormats,
+                        sampleRows: o.sampleRows, suggestRanges: o.suggestRanges, suggestPrecision: o.suggestPrecision,
+                        seedComparison: o.seedComparison, allAcceptingFormats: o.allAcceptingFormats,
                     });
                     st.inference.status = 'offered';
                 } catch (e) { notice('error', 'Inference failed: ' + e.message); }

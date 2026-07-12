@@ -1,17 +1,17 @@
 /*!
- * table-validation v1.0.0 — schema-driven table validation & comparison engine,
+ * table-validation v1.1.0 — schema-driven table validation & comparison engine,
  * with config authoring (configModel/createConfigBuilder), ingestion (ingest),
  * and inference (inferConfig) tooling.
- * Implements: Table Validation Library — Core Specification v1.0.0 + Authoring,
- * Ingestion & Inference Addendum v1.0.0 (Browser JS profile v1.0.0).
+ * Implements: Table Validation Library — Core Specification v1.1.0 + Authoring,
+ * Ingestion & Inference Addendum v1.1.0 (Browser JS profile v1.1.0).
  * Single-file vanilla ES2020 IIFE. No dependencies bundled; reads globalThis.luxon /
  * globalThis.ExcelJS at call time only. License: MIT.
  */
 (function (global) {
     'use strict';
 
-    const VERSION = '1.0.0';
-    const SPEC_VERSION = '1.0.0';
+    const VERSION = '1.1.0';
+    const SPEC_VERSION = '1.1.0';
 
     // ================================================================
     // Errors & signals
@@ -227,8 +227,9 @@
     }
 
     // Temporal format token scanning (Core §13.3 normative token table).
-    // Tokens (longest first for greedy decomposition of alpha runs).
-    const FMT_TOKENS = ['yyyy', 'SSS', 'yy', 'MM', 'dd', 'HH', 'hh', 'mm', 'ss', 'ZZ', 'a'];
+    // Tokens (longest first for greedy decomposition of alpha runs — 'MM' before 'M',
+    // 'dd' before 'd', per the §13.3 decomposition rule added in 1.1.0).
+    const FMT_TOKENS = ['yyyy', 'SSS', 'yy', 'MM', 'dd', 'HH', 'hh', 'mm', 'ss', 'ZZ', 'a', 'M', 'd'];
 
     // → array of token names, or null when the format is invalid
     function scanFormatTokens(fmt) {
@@ -569,7 +570,7 @@
         if (isObj(schema.meta)) {
             p1unit(() => {
                 if (!isStr(schema.meta.schemaVersion) || !SEMVER_RE.test(schema.meta.schemaVersion)) {
-                    schemaFail('meta.schemaVersion', 'semver string (e.g. "1.0.0")', schema.meta.schemaVersion);
+                    schemaFail('meta.schemaVersion', 'semver string (e.g. "1.1.0")', schema.meta.schemaVersion);
                 }
             });
             p1unit(() => {
@@ -885,17 +886,19 @@
                             }
                             const has = (x) => toks.includes(x);
                             const hasYear = has('yyyy') || has('yy');
+                            const hasMonth = has('MM') || has('M');            // M/d accepted since 1.1.0
+                            const hasDay = has('dd') || has('d');
                             const timeToks = ['HH', 'hh', 'mm', 'ss', 'SSS', 'a', 'ZZ'];
-                            const dateToks = ['yyyy', 'yy', 'MM', 'dd'];
+                            const dateToks = ['yyyy', 'yy', 'MM', 'dd', 'M', 'd'];
                             if (t.name === 'datetime') {
-                                if (!(hasYear && has('MM') && has('dd') && (has('HH') || has('hh')) && has('mm'))) {
+                                if (!(hasYear && hasMonth && hasDay && (has('HH') || has('hh')) && has('mm'))) {
                                     schemaFail(`${p}.type.formats[${i}]`,
-                                        'datetime format with year, MM, dd, hours, and mm', t.formats[i]);
+                                        'datetime format with year, month, day, hours, and mm', t.formats[i]);
                                 }
                             } else if (t.name === 'date') {
-                                if (!(hasYear && has('MM') && has('dd')) || timeToks.some(has)) {
+                                if (!(hasYear && hasMonth && hasDay) || timeToks.some(has)) {
                                     schemaFail(`${p}.type.formats[${i}]`,
-                                        'date format with year, MM, dd and no time tokens', t.formats[i]);
+                                        'date format with year, month, day and no time tokens', t.formats[i]);
                                 }
                             } else {
                                 if (!((has('HH') || has('hh')) && has('mm')) || dateToks.some(has)) {
@@ -4333,7 +4336,7 @@
         return refs;
     }
 
-    const BUILDER_DEFAULT_SEED = { meta: { schemaVersion: '1.0.0', name: '' }, columns: {} };
+    const BUILDER_DEFAULT_SEED = { meta: { schemaVersion: '1.1.0', name: '' }, columns: {} };
 
     function createConfigBuilder(seed) {
         if (seed !== undefined && seed !== null && !isObj(seed)) {
@@ -5368,12 +5371,19 @@
         { decimalSeparator: '.', groupingSeparators: ["'"] },
     ];
 
-    // Fixed temporal candidate tables, tried date → time → datetime (Addendum §C.4 step 5)
+    // Fixed temporal candidate tables, tried date → time → datetime (Addendum §C.4 step 5).
+    // The 1.1.0 additions are appended after every 1.0.0 candidate so no 1.0.0 winner moves.
     const INFER_TEMPORAL_TABLES = [
-        { type: 'date', formats: ['yyyy-MM-dd', 'dd.MM.yyyy', 'dd/MM/yyyy', 'MM/dd/yyyy', 'yyyyMMdd'] },
+        { type: 'date', formats: ['yyyy-MM-dd', 'dd.MM.yyyy', 'dd/MM/yyyy', 'MM/dd/yyyy', 'yyyyMMdd', 'dd-MM-yyyy', 'yyyy/MM/dd', 'd.M.yyyy', 'd/M/yyyy', 'M/d/yyyy'] },
         { type: 'time', formats: ['HH:mm:ss', 'HH:mm', 'HH:mm:ss.SSS'] },
-        { type: 'datetime', formats: ["yyyy-MM-dd'T'HH:mm:ss", 'yyyy-MM-dd HH:mm:ss', "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd'T'HH:mm:ssZZ", "yyyy-MM-dd'T'HH:mm:ss.SSSZZ", 'dd.MM.yyyy HH:mm:ss', 'dd.MM.yyyy HH:mm'] },
+        { type: 'datetime', formats: ["yyyy-MM-dd'T'HH:mm:ss", 'yyyy-MM-dd HH:mm:ss', "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd'T'HH:mm:ssZZ", "yyyy-MM-dd'T'HH:mm:ss.SSSZZ", 'dd.MM.yyyy HH:mm:ss', 'dd.MM.yyyy HH:mm', 'dd/MM/yyyy HH:mm', 'MM/dd/yyyy HH:mm'] },
     ];
+
+    // §C.4 padded/unpadded twins (1.1.0): the unpadded form accepts a strict superset of
+    // its padded twin. The accepting/used sets are reduced before winner/ambiguity logic:
+    // both twins accepting the same participants → drop the unpadded (all-padded columns
+    // keep their 1.0.0 result); padded accepting a strict subset → drop the padded.
+    const INFER_TWINS = { 'd.M.yyyy': 'dd.MM.yyyy', 'd/M/yyyy': 'dd/MM/yyyy', 'M/d/yyyy': 'MM/dd/yyyy' };
 
     // Inference-only well-formed-grouping acceptance (Addendum §C.4 step 4): grouping
     // separators must partition the integer part into a 1–3 digit lead + exactly-3-digit
@@ -5491,6 +5501,16 @@
                     extra.confidence = 'ambiguous';
                     extra.reasons = ['numericStringBoolAlternative'];
                     extra.alternatives = [{ type: 'bool', formats: null, rank: 1 }];
+                } else if (lux && participants.every((p) => {
+                    // §C.4 digit-date guard (1.1.0): an 8-digit column that fully parses as
+                    // yyyyMMdd stays int (conservative ladder order) but carries the date
+                    // reading as the rank-1 alternative — never swallowed silently again
+                    const s = isStr(p) ? p : canonical(p);
+                    return /^[0-9]{8}$/.test(s) && lux.DateTime.fromFormat(s, 'yyyyMMdd', { zone: 'utc' }).isValid;
+                })) {
+                    extra.confidence = 'ambiguous';
+                    extra.reasons = ['digitDate'];
+                    extra.alternatives = [{ type: 'date', formats: ['yyyyMMdd'], rank: 1 }];
                 }
                 return finish('int', values, extra);
             }
@@ -5558,7 +5578,10 @@
         if (lux && participants.every(isStr)) {
             const valid = (pv, f) => lux.DateTime.fromFormat(pv, f, { zone: 'utc' }).isValid;
             for (const table of INFER_TEMPORAL_TABLES) {
-                const accepting = table.formats.filter((f) => participants.every((pv) => valid(pv, f)));
+                // twin reduction, full-acceptance path: both twins accepting ALL participants
+                // means equal accepted sets → the unpadded twin is dropped (§C.4, 1.1.0)
+                const accepting = table.formats.filter((f) => participants.every((pv) => valid(pv, f)))
+                    .filter((f, _, arr) => !(INFER_TWINS[f] && arr.includes(INFER_TWINS[f])));
                 if (accepting.length > 0) {
                     const winnerFmt = accepting[0];
                     const millis = participants.map((pv) => lux.DateTime.fromFormat(pv, winnerFmt, { zone: 'utc' }).toMillis());
@@ -5585,7 +5608,23 @@
                 // a mixed-format temporal; the draft carries every candidate that accepts at
                 // least one participant, winner (most participants; tie → table order) first.
                 if (allAcceptingFormats) {
-                    const used = table.formats.filter((f) => participants.some((pv) => valid(pv, f)));
+                    // twin reduction, union path (§C.4): the unpadded twin accepts a superset
+                    // of the padded twin's participants — equal accepted sets drop the
+                    // UNPADDED member (1.0.0 outputs stay identical), a strict superset
+                    // drops the PADDED member (it contributes nothing the unpadded lacks)
+                    const nAccepted = (f) => participants.reduce((n, pv) => n + (valid(pv, f) ? 1 : 0), 0);
+                    const used = table.formats.filter((f) => participants.some((pv) => valid(pv, f)))
+                        .filter((f, _, arr) => {
+                            const twinPadded = INFER_TWINS[f];
+                            if (twinPadded && arr.includes(twinPadded)) {
+                                return nAccepted(f) > nAccepted(twinPadded);       // unpadded stays only on strict superset
+                            }
+                            const twinUnpadded = Object.keys(INFER_TWINS).find((u) => INFER_TWINS[u] === f);
+                            if (twinUnpadded && arr.includes(twinUnpadded)) {
+                                return nAccepted(f) === nAccepted(twinUnpadded);   // padded stays unless strictly beaten
+                            }
+                            return true;
+                        });
                     if (used.length > 1 && participants.every((pv) => used.some((f) => valid(pv, f)))) {
                         const acceptCount = new Map(used.map((f) => [f, participants.filter((pv) => valid(pv, f)).length]));
                         const winner = used.reduce((w, f) => acceptCount.get(f) > acceptCount.get(w) ? f : w, used[0]);
@@ -5653,10 +5692,11 @@
         if (!isStr(name) || name.length === 0) {
             throw new TableValidationConfigError('options.name must be a non-empty string');
         }
-        for (const k of ['suggestRanges', 'seedComparison', 'allAcceptingFormats']) {
+        for (const k of ['suggestRanges', 'suggestPrecision', 'seedComparison', 'allAcceptingFormats']) {
             if (o[k] !== undefined && !isBool(o[k])) throw new TableValidationConfigError(`options.${k} must be a boolean`);
         }
         const suggestRanges = o.suggestRanges === true;
+        const suggestPrecision = o.suggestPrecision !== false;                                     // §C.10: default true (1.1.0)
         const seedComparison = o.seedComparison === true;
         const allAcceptingFormats = o.allAcceptingFormats === true;
 
@@ -5712,9 +5752,11 @@
             }
             if (suggestRanges && (c.type === 'int' || c.type === 'float') && c.min !== null) {
                 typeBlock.value = { min: c.min, max: c.max, minInclusive: true, maxInclusive: true };
-                if (c.type === 'float' && c.minPrecision !== null) {
-                    typeBlock.precision = { min: c.minPrecision, max: c.maxPrecision, minInclusive: true, maxInclusive: true };
-                }
+            }
+            // §C.7 (1.1.0): precision decoupled from value ranges — decimal places are
+            // contract-like (default on), observed min/max values usually are not (default off)
+            if (suggestPrecision && c.type === 'float' && c.minPrecision !== null) {
+                typeBlock.precision = { min: c.minPrecision, max: c.maxPrecision, minInclusive: true, maxInclusive: true };
             }
             draftCols[colNames[i]] = { nullable: c.nullable, type: typeBlock };
 
@@ -5750,7 +5792,7 @@
         const nullEquivalents = [''].concat(INFER_NULL_TOKENS.filter((t) => adoptedUnion.has(t)));
         const draft = {
             meta: {
-                schemaVersion: '1.0.0',
+                schemaVersion: '1.1.0',
                 name,
                 description: 'Draft inferred from sample data; review before use.',
             },

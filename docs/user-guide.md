@@ -4,7 +4,7 @@ A task-oriented guide to the console for analysts and data stewards. No programm
 required: everything in this guide happens in the browser, with the mouse and a few
 JSON snippets you can copy verbatim.
 
-*This guide covers console and library version 1.0.0. Screenshots are generated from the
+*This guide covers console and library version 1.1.0. Screenshots are generated from the
 committed example files by [`make-screenshots.py`](make-screenshots.py) — if the console
 changes, rerun that script and the images regenerate exactly.*
 
@@ -230,9 +230,9 @@ audit trail: per column and function, how many cells actually changed. Nothing s
 
 **Raw vs. cleaned is a two-contract story.** Validate the raw feed under the promise
 (the *delivery* contract) and the cleaned table under a tightened config re-inferred
-from the clean data (the *consumption* contract — `amount` now infers `float`,
-`order_date` infers `date ["yyyy-MM-dd"]`, `region` is non-nullable; only uniqueness on
-`order_id` needs adding back by hand). The two verdicts side by side:
+from the clean data (the *consumption* contract — `amount` now infers `float` with a drafted two-decimal
+`precision` bound, `order_date` infers `date ["yyyy-MM-dd"]`, `region` is non-nullable;
+only uniqueness on `order_id` needs adding back by hand). The two verdicts side by side:
 
 | Raw feed, supplier contract | Cleaned table, consumption contract |
 |---|---|
@@ -430,8 +430,11 @@ of twenty rows copied out of an email.
 The Inference card exposes every inference option: **sampleRows** (how many rows the
 evidence is based on — the offer always states `sampled N of M rows`), **suggest
 ranges** (draft observed min/max as constraints — off by default because observed
-bounds are usually too tight), **seed comparison** (start the `comparison` section from
-a detected key), and **all accepting formats**. That last one is the fix for the classic
+bounds are usually too tight), **suggest precision** (draft the observed decimal-places
+bounds on float columns — *on* by default: a money column carrying exactly two decimals
+is a real contract, and the drafted `precision` rule catches truncated or over-precise
+values later), **seed comparison** (start the `comparison` section from a detected key),
+and **all accepting formats**. That last one is the fix for the classic
 mixed-date column:
 
 ![The inference offer with "all accepting formats" checked: order_date now infers date with formats ["yyyy-MM-dd","dd.MM.yyyy"], confidence ambiguous with reason mixedTemporalFormats, while amount and status remain strings.](img/09-infer-options.png)
@@ -562,6 +565,7 @@ The mess → what to do in the console:
 | `1.234,50` / `1 234,50` regional numbers | `formats` on the int/float column (accept as-is), or normalization `reformatNumber` (rewrite) | [5](#5-cleaning-messy-data-normalization), [6](#6-editing-the-config-by-hand) |
 | `NA`, `N/A`, `-`, empty — the null-token zoo | `nullEquivalents` (inference adopts observed tokens; one-click adoption); normalization `nullCoerce` for real nulls | [3](#3-fast-path-file--verdict-in-three-clicks), [9](#9-power-features) |
 | One column, two date spellings | infer with **all accepting formats**, or list several `formats` on the column | [9](#9-power-features), [6](#6-editing-the-config-by-hand) |
+| Unpadded dates (`1.7.2026`) or `yyyyMMdd` digit dates | inference handles unpadded day/month (`d.M.yyyy`); 8-digit date-like int columns get a flagged date alternative in the offer | [3](#3-fast-path-file--verdict-in-three-clicks), [9](#9-power-features) |
 | Region written once per block, blanks below | normalization `fillDown` on the column | [5](#5-cleaning-messy-data-normalization) |
 | Leading-zero ids (`"007"`) | declare the column `string` — an int column would read it as `7` | [6](#6-editing-the-config-by-hand) |
 | Word/Excel artifacts (NBSP, curly quotes, long dashes) | normalization `replaceChars` with an exact substitution map | [5](#5-cleaning-messy-data-normalization) |
@@ -569,12 +573,13 @@ The mess → what to do in the console:
 | Duplicate match keys in a comparison | `onDuplicateKey: reportAndExclude` — one error per key group, rows set aside, run continues | [7](#7-comparing-two-tables) |
 | The golden file names the column differently | *expected header (alias)* on the column's comparison options | [7](#7-comparing-two-tables) |
 | Cent-level rounding differences | *tolerance* on the numeric column (inference suggests one) | [7](#7-comparing-two-tables), [9](#9-power-features) |
+| Amounts must keep exactly N decimals | *suggest precision* (on by default) drafts the observed bounds | [9](#9-power-features) |
 | "What did my change do?" | re-run and read the **Δ Delta** view | [8](#8-iterating) |
 | "Why is this button disabled?" | hover it — every disabled control in the console carries its reason | [2](#2-getting-started), [4](#4-reading-results) |
 
 Deeper reading: the [README](../README.md) (library overview and the messy-data
-cookbook) and the [console architecture](../table-validation-ui-architecture-v1.0.0.md)
+cookbook) and the [console architecture](../table-validation-ui-architecture-v1.1.0.md)
 (§11 maps every library capability to its place in the UI) live in this repository; the
-[core specification](https://github.com/sergeiosipov/table-validation-spec/blob/v1.0.0/table-validation-core-spec-v1.0.0.md)
+[core specification](https://github.com/sergeiosipov/table-validation-spec/blob/v1.1.0/table-validation-core-spec-v1.1.0.md)
 (the exact meaning of every check and verdict) lives in the companion
 `table-validation-spec` repository.

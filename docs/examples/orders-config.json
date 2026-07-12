@@ -1,6 +1,6 @@
 {
   "meta": {
-    "schemaVersion": "1.0.0",
+    "schemaVersion": "1.1.0",
     "name": "orders",
     "description": "Draft inferred from sample data; review before use."
   },
@@ -41,7 +41,13 @@
     "amount": {
       "nullable": true,
       "type": {
-        "name": "float"
+        "name": "float",
+        "precision": {
+          "min": 2,
+          "max": 2,
+          "minInclusive": true,
+          "maxInclusive": true
+        }
       }
     },
     "order_date": {

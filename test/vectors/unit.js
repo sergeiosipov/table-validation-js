@@ -7,10 +7,10 @@
     const SIMPLE = () => ({ meta: META, columns: { a: { type: { name: 'string' } } } });
 
     U('constants — VERSION, SPEC_VERSION, result.specVersion', (t) => {
-        t.assertEq(TV().VERSION, '1.0.0', 'VERSION');
-        t.assertEq(TV().SPEC_VERSION, '1.0.0', 'SPEC_VERSION');
+        t.assertEq(TV().VERSION, '1.1.0', 'VERSION');
+        t.assertEq(TV().SPEC_VERSION, '1.1.0', 'SPEC_VERSION');
         const r = TV().validate(SIMPLE(), { headers: ['a'], rows: [] });
-        t.assertEq(r.specVersion, '1.0.0', 'result.specVersion');
+        t.assertEq(r.specVersion, '1.1.0', 'result.specVersion');
     });
 
     U('config errors — thrown only for caller mistakes, never for schema content', (t) => {

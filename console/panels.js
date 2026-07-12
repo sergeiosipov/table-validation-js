@@ -319,6 +319,8 @@
         const optRow = h('div', { class: 'inline-opts' },
             h('label', { class: 'inline' }, 'sampleRows ', h('input', { type: 'text', class: 'narrow', value: String(o.sampleRows), onchange: (e) => store.dispatch.setInferOption('sampleRows', parseInt(e.target.value, 10) || 1000) })),
             h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: o.suggestRanges, onchange: (e) => store.dispatch.setInferOption('suggestRanges', e.target.checked) }), 'suggest ranges'),
+            h('label', { class: 'inline', title: 'Draft observed decimal-precision bounds on float columns (Addendum §C.7; default on — decimal places are contract-like)' },
+                h('input', { type: 'checkbox', checked: o.suggestPrecision, onchange: (e) => store.dispatch.setInferOption('suggestPrecision', e.target.checked) }), 'suggest precision'),
             h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: o.seedComparison, onchange: (e) => store.dispatch.setInferOption('seedComparison', e.target.checked) }), 'seed comparison'),
             h('label', { class: 'inline', title: 'Draft every accepting temporal format (winner first); mixed-format date columns infer via union coverage (Addendum §C.4)' },
                 h('input', { type: 'checkbox', checked: o.allAcceptingFormats, onchange: (e) => store.dispatch.setInferOption('allAcceptingFormats', e.target.checked) }), 'all accepting formats'),
