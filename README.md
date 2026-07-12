@@ -256,7 +256,7 @@ repository — the runner looks for a sibling checkout (`../table-validation-spe
 present (the JS profile §8 examples are in-repo and always run). The worker protocol
 has its own page, [`test/worker.html`](test/worker.html) (serve over http; workers don't exist on
 `file://` pages). [`test/bench.html`](test/bench.html) / `node test/bench.js` is the performance
-harness behind the [WASM feasibility note](table-validation-wasm-feasibility.md).
+harness; measured numbers and scale guidance live in [`docs/benchmarks.md`](docs/benchmarks.md).
 
 The quality program on top of the golden vectors: a **real-world file corpus** (Excel/1904/
 inline-string XLSX shapes, regional CSVs — byte-embedded, see
@@ -309,7 +309,7 @@ The specification set shares the unified version **1.0.0**, and
 
 - [Browser JS Implementation Specification v1.0.0](table-validation-js-impl-spec-v1.0.0.md) — API, bindings, packaging, incl. `configModel`/`createConfigBuilder`, `ingest`, `inferConfig` (§3.11–§3.13)
 - [Authoring & Run Console — UI Architecture v1.0.0](table-validation-ui-architecture-v1.0.0.md) — the user-facing tool tying authoring/ingestion/inference to the engines; §11 is the normative **full-surface coverage matrix** — every public API capability mapped to a UI affordance, all-local static files, deps CDN-only
-- [WASM Feasibility Note](table-validation-wasm-feasibility.md) — ADR-style investigation: measured JS baseline (10⁴–10⁷ cells), costs, and a ⚑ go/no-go recommendation
+- [Benchmarks](docs/benchmarks.md) — measured `validate()`/`compare()` performance at 10⁴–10⁷ cells in Node and Chromium, scale guidance, and how to rerun the harness (browser, zero toolchain)
 
 **In the companion spec repository** (language-agnostic, source of truth —
 [`table-validation-spec`](https://github.com/sergeiosipov/table-validation-spec), currently
