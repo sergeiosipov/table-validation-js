@@ -85,10 +85,14 @@
         <div class="card-title">3 · Infer</div>
         <button id="run" class="primary" disabled>Infer all</button>
         <button id="zip" disabled>Download all as ZIP</button>
+        <button id="xlsx" disabled title="One workbook: a sheet per inferred file, the inferred column metadata (type, format, precision, nullable, confidence, evidence) above the table data">Download combined XLSX</button>
         <span id="progress" class="hint"></span>
         <div class="hint">The ZIP carries one <code>&lt;file&gt;.config.json</code> per success (engine-consumable,
             exactly what the console would export), optional <code>&lt;file&gt;.report.json</code> evidence,
-            and a <code>manifest.json</code> naming every input with its outcome — failures included.</div>
+            and a <code>manifest.json</code> naming every input with its outcome — failures included.
+            The combined XLSX is the human review copy: one sheet per inferred file, each column
+            annotated above the data with its inferred type, format, precision, nullability,
+            confidence and sample evidence — the full ingested data below.</div>
         <table class="grid" id="results" hidden>
             <thead><tr><th>file</th><th>status</th><th>table</th><th>columns</th><th></th></tr></thead>
             <tbody id="rows"></tbody>
@@ -127,11 +131,12 @@
                 const format = FORMAT_BY_EXT[extOf(f.name)] || null;
                 return { file: f, relPath: f.webkitRelativePath || f.name, format,
                          status: format ? 'pending' : 'unsupported', error: null,
-                         table: null, draft: null, report: null, valid: null };
+                         table: null, tableData: null, draft: null, report: null, valid: null };
             })
             .sort((a, b) => a.relPath < b.relPath ? -1 : 1);
         $('run').disabled = !entries.some((e) => e.status === 'pending');
         $('zip').disabled = true;
+        $('xlsx').disabled = true;
         $('progress').textContent = '';
         render();
     }
@@ -165,6 +170,7 @@
             }
             const r = await TV().ingest(source, buildSpec(e.format, jsonKind));
             e.table = { rows: r.table.rows.length, cols: r.source.columnCount, warnings: r.warnings.length };
+            e.tableData = r.table;                       // kept for the combined-XLSX review copy
             const out = TV().inferConfig(r.table, {
                 name: stemOf(e.relPath).split('/').pop() || 'inferred-config',
                 sampleRows: parseInt($('optSample').value, 10) || 1000,
@@ -197,6 +203,8 @@
         $('progress').textContent = `done — ${ok} inferred, ${failed} failed, ${skipped} skipped`;
         $('run').disabled = false;
         $('zip').disabled = ok === 0;
+        $('xlsx').disabled = ok === 0 || typeof ExcelJS === 'undefined';
+        if (typeof ExcelJS === 'undefined') $('xlsx').title = 'ExcelJS could not be loaded from the CDN';
     }
 
     function download(fileName, blob) {
@@ -237,6 +245,79 @@
         }
         zip.file('manifest.json', JSON.stringify(manifest, null, 2) + '\n');
         download('inferred-configs.zip', await zip.generateAsync({ type: 'blob' }));
+    }
+
+    // ---- combined XLSX: one sheet per inferred file; the inferred column metadata
+    // sits ABOVE the table data (type, format, precision, nullable, confidence,
+    // sample evidence, candidate key, alternatives), the full ingested data below.
+    // Everything shown comes from the draft/report verbatim — nothing re-derived.
+
+    const CONF_FILL = { high: 'FFE2F0D9', ambiguous: 'FFFFEB9C', fallback: 'FFEFEFEF' };
+
+    function sheetNameFor(relPath, usedNames) {
+        let base = (stemOf(relPath).split('/').pop() || 'sheet').replace(/[\[\]*?:\/\\]/g, '_').slice(0, 28) || 'sheet';
+        let name = base, n = 2;
+        while (usedNames.has(name.toLowerCase())) name = `${base.slice(0, 25)}~${n++}`;
+        usedNames.add(name.toLowerCase());
+        return name;
+    }
+
+    function fmtOf(colDef) {
+        const f = colDef.type.formats;
+        if (!f) return '';
+        return f.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(', ');
+    }
+
+    async function makeXlsx() {
+        const wb = new ExcelJS.Workbook();
+        const usedNames = new Set();
+        for (const e of entries) {
+            if (e.status !== 'ok' || !e.tableData) continue;
+            const ws = wb.addWorksheet(sheetNameFor(e.relPath, usedNames));
+            const cols = e.report.columns;                     // table column order (§C.7)
+            const defs = e.draft.columns;
+            const per = (fn) => cols.map((c) => fn(c, defs[c.name]));
+
+            ws.addRow(['file', `${e.relPath} — ${e.table.rows} rows × ${e.table.cols} cols · sampled ${e.report.sample.rowsSampled} of ${e.report.sample.rowsAvailable} rows · engine v${TV().VERSION}`]);
+            const meta = [
+                ['column', per((c) => c.name)],
+                ['inferred type', per((c) => c.inferredType)],
+                ['format', per((c, d) => fmtOf(d))],
+                ['precision', per((c, d) => d.type.precision
+                    ? (d.type.precision.min === d.type.precision.max ? String(d.type.precision.min) : `${d.type.precision.min}–${d.type.precision.max}`)
+                    : '')],
+                ['nullable', per((c, d) => String(d.nullable))],
+                ['confidence', per((c) => c.confidence)],
+                ['nulls (sample)', per((c) => c.observed.nulls)],
+                ['distinct (sample)', per((c) => c.observed.distinctCount)],
+                ['candidate key', per((c) => (c.candidateKey ? '●' : ''))],
+                ['alternatives', per((c) => c.alternatives
+                    .map((a) => a.type + (a.formats ? ' ' + a.formats.join('|') : '')).join(', '))],
+            ];
+            for (const [label, values] of meta) ws.addRow([label, ...values]);
+            ws.addRow([]);
+            const headerRow = ws.addRow(['#', ...cols.map((c) => c.name)]);
+
+            // styling: labels + headers bold; the type row tinted by confidence
+            ws.getColumn(1).width = 16;
+            for (let i = 0; i < cols.length; i++) ws.getColumn(i + 2).width = 14;
+            for (let r = 1; r <= meta.length + 1; r++) ws.getRow(r).getCell(1).font = { bold: true };
+            ws.getRow(2).font = { bold: true };
+            headerRow.font = { bold: true };
+            const typeRow = ws.getRow(3);
+            cols.forEach((c, i) => {
+                typeRow.getCell(i + 2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CONF_FILL[c.confidence] || CONF_FILL.fallback } };
+            });
+            ws.views = [{ state: 'frozen', xSplit: 1, ySplit: meta.length + 3 }];
+
+            // the full ingested data, null cells left empty
+            for (let ri = 0; ri < e.tableData.rows.length; ri++) {
+                const row = e.tableData.rows[ri];
+                ws.addRow([ri + 1, ...cols.map((_, ci) => (row[ci] === null || row[ci] === undefined ? null : row[ci]))]);
+            }
+        }
+        const buf = await wb.xlsx.writeBuffer();
+        download('inferred-workbook.xlsx', new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
     }
 
     function render() {
@@ -296,7 +377,8 @@
         $('inFolder').addEventListener('change', (ev) => { if (ev.target.files.length) setFiles(ev.target.files); ev.target.value = ''; });
         $('run').addEventListener('click', runAll);
         $('zip').addEventListener('click', makeZip);
-        window.__tvbatch = { entries: () => entries, setFiles, runAll, makeZip };   // dev/testing handle
+        $('xlsx').addEventListener('click', makeXlsx);
+        window.__tvbatch = { entries: () => entries, setFiles, runAll, makeZip, makeXlsx };   // dev/testing handle
     });
 })();
 </script>

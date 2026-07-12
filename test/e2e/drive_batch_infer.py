@@ -81,6 +81,21 @@ with sync_playwright() as p:
     print(f"[{browser_name}] files mode: 2 inferred, 1 failed, 1 skipped; ZIP verified "
           f"({len(names)} entries, manifest complete)")
 
+    # ---- the combined XLSX: one sheet per inferred file, inferred metadata above the data
+    with page.expect_download() as dl:
+        page.click("#xlsx")
+    xpath = tmp / "workbook.xlsx"
+    dl.value.save_as(str(xpath))
+    x = zipfile.ZipFile(xpath)
+    wbxml = x.read("xl/workbook.xml").decode("utf-8")
+    assert 'name="clean"' in wbxml and 'name="records"' in wbxml, f"sheets missing: {wbxml[:300]}"
+    assert wbxml.count("<sheet ") == 2, "exactly one sheet per inferred file"
+    shared = x.read("xl/sharedStrings.xml").decode("utf-8")
+    for needle in ("inferred type", "format", "precision", "nullable", "confidence",
+                   "candidate key", "alternatives", "date", "float", "yyyy-MM-dd", "North"):
+        assert needle in shared, f"combined XLSX lacks '{needle}' (metadata block or data rows missing)"
+    print(f"[{browser_name}] combined XLSX: 2 sheets, metadata block + data present")
+
     # ---- folder pick over docs/examples: recursion + relative paths + honest failure
     # (orders-config.json is a JSON *object*, not a table — it must fail, not vanish)
     page.set_input_files("#inFolder", str(repo / "docs" / "examples"))
