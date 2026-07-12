@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Table Validation — Batch Config Inference</title>
+    <!-- STANDALONE TOOL: infer a draft config for MANY files at once and save them
+         all as one ZIP. Single hand-authored file — send it anywhere; the engine and
+         libraries load from CDN (the engine pinned to the immutable v1.0.0 tag with
+         subresource integrity). Files are read locally in the browser and never leave
+         the machine; the only network access is cdn.jsdelivr.net.
+
+         Same contracts as the console: nothing is sniffed beyond the stated
+         extension→format mapping, inference is explicit (a button, never automatic),
+         and a draft is a suggestion — review it (e.g. in the Authoring & Run Console)
+         before relying on it. -->
+    <style>
+        :root { --bg:#111417; --panel:#1a1f24; --line:#2c343b; --fg:#d7dde3; --dim:#8a949e;
+                --acc:#4ea1ff; --ok:#7be08a; --warn:#e8c264; --err:#f08080; }
+        * { box-sizing: border-box; }
+        body { font: 13px/1.45 ui-monospace, Consolas, monospace; margin: 0; background: var(--bg); color: var(--fg); }
+        #app { max-width: 1100px; margin: 0 auto; padding: .6rem 1rem 3rem; }
+        h1 { font-size: 16px; } h1 small { color: var(--dim); font-weight: normal; }
+        .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: .7rem .9rem; margin-bottom: .8rem; }
+        .card-title { font-weight: bold; margin-bottom: .5rem; }
+        .hint { color: var(--dim); font-size: 12px; margin: .2rem 0; }
+        button { background: #232a31; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: .25rem .6rem; cursor: pointer; font: inherit; }
+        button:hover:not(:disabled) { border-color: var(--acc); }
+        button:disabled { opacity: .45; cursor: not-allowed; }
+        button.primary { background: #17324d; border-color: #2b5c8f; }
+        button.mini { padding: 0 .35rem; font-size: 11px; }
+        select, input[type=text] { background: #14181c; color: var(--fg); border: 1px solid var(--line); border-radius: 3px; padding: .2rem .35rem; font: inherit; }
+        input.narrow { width: 6rem; }
+        label.inline { display: inline-flex; align-items: center; gap: .3rem; margin: 0 .9rem .3rem 0; white-space: nowrap; }
+        .grid { border-collapse: collapse; margin: .4rem 0; width: 100%; }
+        .grid th, .grid td { border: 1px solid var(--line); padding: .15rem .45rem; text-align: left; vertical-align: top; }
+        .grid th { background: #20262c; }
+        .st-ok { color: var(--ok); } .st-err { color: var(--err); } .st-skip { color: var(--dim); } .st-run { color: var(--warn); }
+        .conf-high { color: var(--ok); } .conf-ambiguous { color: var(--warn); } .conf-fallback { color: var(--dim); }
+        details > summary { cursor: pointer; color: var(--dim); }
+        :focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <h1>Batch Config Inference <small id="ver"></small></h1>
+    <div class="hint">Pick many table files (or a whole folder), infer one draft config per file, download
+        everything as a ZIP. Files are read locally in this page — they never leave the machine; the only
+        network access is cdn.jsdelivr.net. Drafts are suggestions, never authoritative — review them
+        before use (the Authoring &amp; Run Console is the place to do that).</div>
+
+    <div class="card">
+        <div class="card-title">1 · Pick files</div>
+        <button id="pickFiles" class="primary">Select files…</button>
+        <button id="pickFolder">Select a folder…</button>
+        <input id="inFiles" type="file" multiple style="display:none">
+        <input id="inFolder" type="file" webkitdirectory style="display:none">
+        <div class="hint">Supported (mapped from the extension — nothing is content-sniffed):
+            <b>.csv</b> · <b>.tsv</b> · <b>.txt</b> (read as CSV) · <b>.xlsx</b> · <b>.json</b>
+            (an array of records ingests as <code>jsonObjects</code>, an array of rows as
+            <code>jsonArrays</code> — the one stated peek this tool makes). A folder pick recurses;
+            unsupported files are listed as skipped, never silently dropped.</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">2 · Options — applied to every file</div>
+        <label class="inline">header <select id="optHeader"><option value="firstRow" selected>firstRow</option><option value="none">none</option></select></label>
+        <label class="inline">skip leading rows <input id="optSkip" type="text" class="narrow" value="0"></label>
+        <label class="inline">skip footer rows <input id="optFooter" type="text" class="narrow" value="0"></label>
+        <label class="inline">csv delimiter <input id="optDelim" type="text" class="narrow" value=","></label>
+        <label class="inline">encoding <input id="optEnc" type="text" class="narrow" value="auto"></label>
+        <label class="inline">xlsx sheet <input id="optSheet" type="text" class="narrow" value="0"></label>
+        <br>
+        <label class="inline">sampleRows <input id="optSample" type="text" class="narrow" value="1000"></label>
+        <label class="inline"><input id="optAllFmt" type="checkbox" checked> all accepting formats</label>
+        <label class="inline"><input id="optRanges" type="checkbox"> suggest ranges</label>
+        <label class="inline"><input id="optSeedCmp" type="checkbox"> seed comparison</label>
+        <label class="inline"><input id="optReports" type="checkbox" checked> include inference reports in the ZIP</label>
+        <div class="hint">“all accepting formats” drafts every accepting temporal format (union coverage
+            for mixed-date columns) — usually what you want for messy feeds.</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">3 · Infer</div>
+        <button id="run" class="primary" disabled>Infer all</button>
+        <button id="zip" disabled>Download all as ZIP</button>
+        <span id="progress" class="hint"></span>
+        <div class="hint">The ZIP carries one <code>&lt;file&gt;.config.json</code> per success (engine-consumable,
+            exactly what the console would export), optional <code>&lt;file&gt;.report.json</code> evidence,
+            and a <code>manifest.json</code> naming every input with its outcome — failures included.</div>
+        <table class="grid" id="results" hidden>
+            <thead><tr><th>file</th><th>status</th><th>table</th><th>columns</th><th></th></tr></thead>
+            <tbody id="rows"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Dependencies (JS profile §2 posture): Luxon = temporal inference; ExcelJS = .xlsx
+     ingestion; JSZip = the output archive; the engine pinned to the immutable tag. -->
+<script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"
+        integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.0.0/dist/table-validation.js"
+        integrity="sha384-6Qg+Z7kzn+QhKYSzKRnoKakG5EI+gJLbXOyJV6JkAlGk251M30BTur4L3QJpI/KA"
+        crossorigin="anonymous"></script>
+<script>
+'use strict';
+(function () {
+    const TV = () => window.TableValidation;
+    const $ = (id) => document.getElementById(id);
+    const FORMAT_BY_EXT = { csv: 'csv', tsv: 'tsv', txt: 'csv', xlsx: 'xlsx', json: 'json' };
+
+    // entries: { file, relPath, format, status, error, table, draft, report, valid }
+    // status: 'pending' | 'unsupported' | 'running' | 'ok' | 'failed'
+    let entries = [];
+
+    function extOf(name) { return ((name.match(/\.([^.]+)$/) || [])[1] || '').toLowerCase(); }
+    function stemOf(relPath) { return relPath.replace(/\.[^.\/]+$/, ''); }
+
+    function setFiles(fileList) {
+        entries = [...fileList]
+            .filter((f) => !f.name.startsWith('.'))
+            .map((f) => {
+                const format = FORMAT_BY_EXT[extOf(f.name)] || null;
+                return { file: f, relPath: f.webkitRelativePath || f.name, format,
+                         status: format ? 'pending' : 'unsupported', error: null,
+                         table: null, draft: null, report: null, valid: null };
+            })
+            .sort((a, b) => a.relPath < b.relPath ? -1 : 1);
+        $('run').disabled = !entries.some((e) => e.status === 'pending');
+        $('zip').disabled = true;
+        $('progress').textContent = '';
+        render();
+    }
+
+    function buildSpec(format, jsonKind) {
+        const spec = { format: format === 'json' ? jsonKind : format };
+        if (spec.format !== 'jsonObjects') spec.header = { mode: $('optHeader').value };
+        if (spec.format === 'csv') spec.csv = { delimiter: $('optDelim').value || ',', quote: '"', encoding: $('optEnc').value || 'auto' };
+        if (spec.format === 'tsv') spec.csv = { quote: '"', encoding: $('optEnc').value || 'auto' };
+        if (spec.format === 'xlsx') {
+            const s = $('optSheet').value.trim();
+            spec.xlsx = { sheet: /^\d+$/.test(s) ? parseInt(s, 10) : s };
+        }
+        for (const [id, key] of [['optSkip', 'skipRows'], ['optFooter', 'skipFooterRows']]) {
+            const v = $(id).value.trim();
+            if (v !== '' && v !== '0') spec[key] = /^\d+$/.test(v) ? parseInt(v, 10) : v;   // non-int → I13 error surfaces
+        }
+        return spec;
+    }
+
+    async function inferOne(e) {
+        e.status = 'running';
+        render();
+        try {
+            let source = e.file;
+            let jsonKind = null;
+            if (e.format === 'json') {
+                source = await e.file.text();
+                // the one stated peek: array-of-records → jsonObjects, else jsonArrays
+                jsonKind = source.replace(/^\s*\[\s*/, '').startsWith('{') ? 'jsonObjects' : 'jsonArrays';
+            }
+            const r = await TV().ingest(source, buildSpec(e.format, jsonKind));
+            e.table = { rows: r.table.rows.length, cols: r.source.columnCount, warnings: r.warnings.length };
+            const out = TV().inferConfig(r.table, {
+                name: stemOf(e.relPath).split('/').pop() || 'inferred-config',
+                sampleRows: parseInt($('optSample').value, 10) || 1000,
+                suggestRanges: $('optRanges').checked,
+                seedComparison: $('optSeedCmp').checked,
+                allAcceptingFormats: $('optAllFmt').checked,
+            });
+            e.draft = out.draft;
+            e.report = out.report;
+            e.valid = TV().createConfigBuilder(out.draft).validate().valid;   // rule N1, shown, not assumed
+            e.status = 'ok';
+        } catch (err) {
+            e.status = 'failed';
+            e.error = { code: err.code || err.name || 'error', message: err.message };
+        }
+        render();
+    }
+
+    async function runAll() {
+        $('run').disabled = true;
+        const todo = entries.filter((x) => x.status !== 'unsupported');
+        for (let i = 0; i < todo.length; i++) {
+            $('progress').textContent = `inferring ${i + 1} / ${todo.length}…`;
+            await inferOne(todo[i]);
+        }
+        const ok = entries.filter((x) => x.status === 'ok').length;
+        const failed = entries.filter((x) => x.status === 'failed').length;
+        const skipped = entries.filter((x) => x.status === 'unsupported').length;
+        $('progress').textContent = `done — ${ok} inferred, ${failed} failed, ${skipped} skipped`;
+        $('run').disabled = false;
+        $('zip').disabled = ok === 0;
+    }
+
+    function download(fileName, blob) {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    async function makeZip() {
+        const zip = new JSZip();
+        const manifest = {
+            tool: 'table-validation batch config inference',
+            engineVersion: TV().VERSION,
+            options: {
+                header: $('optHeader').value, skipRows: $('optSkip').value, skipFooterRows: $('optFooter').value,
+                delimiter: $('optDelim').value, encoding: $('optEnc').value, sheet: $('optSheet').value,
+                sampleRows: $('optSample').value, allAcceptingFormats: $('optAllFmt').checked,
+                suggestRanges: $('optRanges').checked, seedComparison: $('optSeedCmp').checked,
+            },
+            files: [],
+        };
+        for (const e of entries) {
+            const item = { file: e.relPath, status: e.status };
+            if (e.status === 'ok') {
+                const base = stemOf(e.relPath);
+                item.config = base + '.config.json';
+                zip.file(item.config, JSON.stringify(e.draft, null, 2) + '\n');
+                if ($('optReports').checked) {
+                    item.report = base + '.report.json';
+                    zip.file(item.report, JSON.stringify(e.report, null, 2) + '\n');
+                }
+            }
+            if (e.status === 'failed') item.error = e.error;
+            manifest.files.push(item);
+        }
+        zip.file('manifest.json', JSON.stringify(manifest, null, 2) + '\n');
+        download('inferred-configs.zip', await zip.generateAsync({ type: 'blob' }));
+    }
+
+    function render() {
+        $('results').hidden = entries.length === 0;
+        const tbody = $('rows');
+        tbody.replaceChildren();
+        for (const e of entries) {
+            const tr = document.createElement('tr');
+            const cells = [];
+            cells.push(`<td>${esc(e.relPath)}</td>`);
+            if (e.status === 'unsupported') cells.push('<td class="st-skip">skipped — unsupported extension</td><td>—</td><td>—</td><td></td>');
+            else if (e.status === 'pending') cells.push(`<td class="st-skip">pending (${e.format})</td><td>—</td><td>—</td><td></td>`);
+            else if (e.status === 'running') cells.push('<td class="st-run">inferring…</td><td>—</td><td>—</td><td></td>');
+            else if (e.status === 'failed') cells.push(`<td class="st-err">✖ ${esc(e.error.code)}</td><td colspan="2">${esc(e.error.message)}</td><td></td>`);
+            else {
+                const cols = e.report.columns;
+                const confs = cols.reduce((m, c) => (m[c.confidence] = (m[c.confidence] || 0) + 1, m), {});
+                const confTxt = ['high', 'ambiguous', 'fallback'].filter((k) => confs[k])
+                    .map((k) => `<span class="conf-${k}">${confs[k]} ${k}</span>`).join(' · ');
+                cells.push(`<td class="st-ok">✓ inferred${e.valid ? ' · authoring-valid' : ''}</td>`);
+                cells.push(`<td>${e.table.rows} rows × ${e.table.cols} cols${e.table.warnings ? ` · ${e.table.warnings} ingest warning(s)` : ''}</td>`);
+                cells.push(`<td>${confTxt}<details><summary>evidence</summary>${evidence(e)}</details></td>`);
+                cells.push('<td><button class="mini" data-dl="config">config</button> <button class="mini" data-dl="report">report</button></td>');
+            }
+            tr.innerHTML = cells.join('');
+            if (e.status === 'ok') {
+                tr.querySelector('[data-dl="config"]').addEventListener('click', () =>
+                    download(stemOf(e.relPath).split('/').pop() + '.config.json', new Blob([JSON.stringify(e.draft, null, 2)], { type: 'application/json' })));
+                tr.querySelector('[data-dl="report"]').addEventListener('click', () =>
+                    download(stemOf(e.relPath).split('/').pop() + '.report.json', new Blob([JSON.stringify(e.report, null, 2)], { type: 'application/json' })));
+            }
+            tbody.appendChild(tr);
+        }
+    }
+
+    function evidence(e) {
+        const rows = e.report.columns.map((c) => `<tr><td>${esc(c.name)}</td>`
+            + `<td>${esc(c.inferredType)}${e.draft.columns[c.name].type.formats ? ' ' + esc(JSON.stringify(e.draft.columns[c.name].type.formats)) : ''}</td>`
+            + `<td class="conf-${c.confidence}">${c.confidence}</td>`
+            + `<td>${c.observed.nulls}</td><td>${c.observed.distinctCount}</td><td>${c.candidateKey ? '●' : ''}</td></tr>`).join('');
+        return `<table class="grid"><tr><th>column</th><th>type</th><th>confidence</th><th>nulls</th><th>distinct</th><th>key?</th></tr>${rows}</table>`
+            + `<div class="hint">sampled ${e.report.sample.rowsSampled} of ${e.report.sample.rowsAvailable} rows`
+            + (e.report.candidateKeys.length ? ` · candidate keys: ${esc(e.report.candidateKeys.join(', '))}` : ' · no single-column key candidate') + '</div>';
+    }
+
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+    window.addEventListener('load', () => {
+        if (!window.TableValidation || !window.JSZip) {
+            $('app').textContent = 'Failed to load the engine or JSZip from cdn.jsdelivr.net — this tool needs network access to the CDN.';
+            return;
+        }
+        $('ver').textContent = 'engine v' + TV().VERSION;
+        $('pickFiles').addEventListener('click', () => $('inFiles').click());
+        $('pickFolder').addEventListener('click', () => $('inFolder').click());
+        $('inFiles').addEventListener('change', (ev) => { if (ev.target.files.length) setFiles(ev.target.files); ev.target.value = ''; });
+        $('inFolder').addEventListener('change', (ev) => { if (ev.target.files.length) setFiles(ev.target.files); ev.target.value = ''; });
+        $('run').addEventListener('click', runAll);
+        $('zip').addEventListener('click', makeZip);
+        window.__tvbatch = { entries: () => entries, setFiles, runAll, makeZip };   // dev/testing handle
+    });
+})();
+</script>
+</body>
+</html>
