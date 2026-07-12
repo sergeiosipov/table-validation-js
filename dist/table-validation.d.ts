@@ -1,6 +1,6 @@
 /*!
- * table-validation v1.1.0 — hand-authored TypeScript declarations for the Browser JS
- * profile (Core Specification v1.1.0 + Authoring, Ingestion & Inference Addendum v1.1.0).
+ * table-validation v1.2.0 — hand-authored TypeScript declarations for the Browser JS
+ * profile (Core Specification v1.2.0 + Authoring, Ingestion & Inference Addendum v1.2.0).
  * The runtime is a single IIFE exposing one global, `TableValidation`; these
  * declarations describe that global. No build step — this file is authored by hand,
  * kept in lockstep with dist/table-validation.js, and served from the same CDN tag.
@@ -40,6 +40,8 @@ declare namespace TableValidation {
     interface NumberFormat {
         decimalSeparator: string | null;
         groupingSeparators: string[];
+        /** §3.5 (1.2.0): accept bare decimals — ".85" reads as 0.85. Default false; requires a non-null decimalSeparator. */
+        allowBareDecimal?: boolean;
     }
 
     type SeverityLevel = 'error' | 'warning';
@@ -558,6 +560,8 @@ declare namespace TableValidation {
         seedComparison?: boolean;
         /** §C.4 step 5: draft every accepting temporal candidate; union coverage for mixed columns. */
         allAcceptingFormats?: boolean;
+        /** §C.2 (1.2.0): the sample is the whole table; acceptance over unique values. Default false. */
+        exhaustive?: boolean;
     }
 
     interface InferenceReportColumn {
@@ -582,7 +586,7 @@ declare namespace TableValidation {
     }
 
     interface InferenceReport {
-        sample: { rowsAvailable: number; rowsSampled: number };
+        sample: { rowsAvailable: number; rowsSampled: number; exhaustive: boolean };
         columns: InferenceReportColumn[];
         candidateKeys: string[];
         noSingleColumnKey: boolean;

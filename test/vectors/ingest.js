@@ -484,4 +484,20 @@
             assert(e !== null, 'formatMismatch surfaced');
         },
     });
+
+    U.push({
+        suite, name: 'normalization reformatNumber (1.2.0): allowBareDecimal canonicalizes ".85" to "0.85"',
+        fn: async ({ assert, assertEq }) => {
+            const r = await TV().ingest('v\n.85\n-.02\n6.16\nabc\n', {
+                format: 'csv',
+                normalization: { columns: { v: [{ fn: 'reformatNumber',
+                    params: { format: { decimalSeparator: '.', groupingSeparators: [','], allowBareDecimal: true } } }] } },
+            });
+            assertEq(r.table.rows.map((row) => row[0]), ['0.85', '-0.02', '6.16', 'abc'],
+                'bare decimals gain the leading zero; unparseable content passes through');
+            const acts = r.normalizationActions;
+            assertEq(acts, [{ column: 'v', fn: 'reformatNumber', count: 2 }], 'only the two changed cells counted');
+        },
+    });
+
 })();

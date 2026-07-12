@@ -55,7 +55,7 @@ A task-oriented guide to the console for analysts and data stewards. No programm
 required: everything in this guide happens in the browser, with the mouse and a few
 JSON snippets you can copy verbatim.
 
-*This guide covers console and library version 1.1.0. Screenshots are generated from the
+*This guide covers console and library version 1.2.0. Screenshots are generated from the
 committed example files by [`make-screenshots.py`](make-screenshots.py) — if the console
 changes, rerun that script and the images regenerate exactly.*
 
@@ -485,7 +485,10 @@ bounds are usually too tight), **suggest precision** (draft the observed decimal
 bounds on float columns — *on* by default: a money column carrying exactly two decimals
 is a real contract, and the drafted `precision` rule catches truncated or over-precise
 values later), **seed comparison** (start the `comparison` section from a detected key),
-and **all accepting formats**. That last one is the fix for the classic
+**all accepting formats**, and **exhaustive (all rows)** — evaluate every row instead of
+the first thousand, so conclusions (types, nullability, key candidates) are facts of the
+whole table rather than of a prefix; slower on very large files, worth it before you
+freeze a contract. That last one is the fix for the classic
 mixed-date column:
 
 ![The inference offer with "all accepting formats" checked: order_date now infers date with formats ["yyyy-MM-dd","dd.MM.yyyy"], confidence ambiguous with reason mixedTemporalFormats, while amount and status remain strings.](img/09-infer-options.png)
@@ -625,13 +628,14 @@ The mess → what to do in the console:
 | The golden file names the column differently | *expected header (alias)* on the column's comparison options | [7](#7-comparing-two-tables) |
 | Cent-level rounding differences | *tolerance* on the numeric column (inference suggests one) | [7](#7-comparing-two-tables), [9](#9-power-features) |
 | Amounts must keep exactly N decimals | *suggest precision* (on by default) drafts the observed bounds | [9](#9-power-features) |
+| Decimals without a leading zero (`.85`) | inference drafts a NumberFormat with `allowBareDecimal` — validation reads `.85` as `0.85` | [9](#9-power-features) |
 | "What did my change do?" | re-run and read the **Δ Delta** view | [8](#8-iterating) |
 | "Why is this button disabled?" | hover it — every disabled control in the console carries its reason | [2](#2-getting-started), [4](#4-reading-results) |
 
 Deeper reading: the [README](../README.md) (library overview and the messy-data
-cookbook) and the [console architecture](../table-validation-ui-architecture-v1.1.0.md)
+cookbook) and the [console architecture](../table-validation-ui-architecture-v1.2.0.md)
 (§11 maps every library capability to its place in the UI) live in this repository; the
-[core specification](https://github.com/sergeiosipov/table-validation-spec/blob/v1.1.0/table-validation-core-spec-v1.1.0.md)
+[core specification](https://github.com/sergeiosipov/table-validation-spec/blob/v1.2.0/table-validation-core-spec-v1.2.0.md)
 (the exact meaning of every check and verdict) lives in the companion
 `table-validation-spec` repository.
 </script>

@@ -1,17 +1,17 @@
 /*!
- * table-validation v1.1.0 — schema-driven table validation & comparison engine,
+ * table-validation v1.2.0 — schema-driven table validation & comparison engine,
  * with config authoring (configModel/createConfigBuilder), ingestion (ingest),
  * and inference (inferConfig) tooling.
- * Implements: Table Validation Library — Core Specification v1.1.0 + Authoring,
- * Ingestion & Inference Addendum v1.1.0 (Browser JS profile v1.1.0).
+ * Implements: Table Validation Library — Core Specification v1.2.0 + Authoring,
+ * Ingestion & Inference Addendum v1.2.0 (Browser JS profile v1.2.0).
  * Single-file vanilla ES2020 IIFE. No dependencies bundled; reads globalThis.luxon /
  * globalThis.ExcelJS at call time only. License: MIT.
  */
 (function (global) {
     'use strict';
 
-    const VERSION = '1.1.0';
-    const SPEC_VERSION = '1.1.0';
+    const VERSION = '1.2.0';
+    const SPEC_VERSION = '1.2.0';
 
     // ================================================================
     // Errors & signals
@@ -140,7 +140,11 @@
                 w = w.slice(0, first) + '.' + w.slice(first + fmt.decimalSeparator.length);
             }
         }
-        if (!(intContext ? INT_RE : FLOAT_RE).test(w)) return null;
+        if (!(intContext ? INT_RE : FLOAT_RE).test(w)) {
+            // §3.5 bare decimal (1.2.0, opt-in): ".85" → working copy "0.85"; never in int contexts
+            if (intContext || fmt.allowBareDecimal !== true || !/^[+-]?\.[0-9]+$/.test(w)) return null;
+            w = (w[0] === '+' || w[0] === '-') ? w[0] + '0' + w.slice(1) : '0' + w;
+        }
         const value = Number(w);
         const dot = w.indexOf('.');
         return { value, precision: dot === -1 ? 0 : w.length - dot - 1 };
@@ -505,6 +509,14 @@
             }
             seen.add(g);
         }
+        if (f.allowBareDecimal !== undefined) {                            // rule 12 (1.2.0)
+            if (!isBool(f.allowBareDecimal)) {
+                schemaFail(`${path}.allowBareDecimal`, 'boolean', f.allowBareDecimal);
+            }
+            if (f.allowBareDecimal === true && ds === null) {
+                schemaFail(`${path}.allowBareDecimal`, 'a non-null decimalSeparator when allowBareDecimal is true', f.allowBareDecimal);
+            }
+        }
     }
 
     // kind: 'count' | 'number' | 'intSafe' | 'datetime' | 'date' | 'time'
@@ -570,7 +582,7 @@
         if (isObj(schema.meta)) {
             p1unit(() => {
                 if (!isStr(schema.meta.schemaVersion) || !SEMVER_RE.test(schema.meta.schemaVersion)) {
-                    schemaFail('meta.schemaVersion', 'semver string (e.g. "1.1.0")', schema.meta.schemaVersion);
+                    schemaFail('meta.schemaVersion', 'semver string (e.g. "1.2.0")', schema.meta.schemaVersion);
                 }
             });
             p1unit(() => {
@@ -1278,6 +1290,7 @@
                     formats: t.formats != null ? t.formats.map((f) => ({
                         decimalSeparator: f.decimalSeparator !== undefined ? f.decimalSeparator : null,
                         groupingSeparators: f.groupingSeparators !== undefined ? f.groupingSeparators : [],
+                        allowBareDecimal: f.allowBareDecimal === true,                 // §3.5 (1.2.0)
                     })) : null,
                     value: t.value != null ? t.value : null,
                     precision: tn === 'float' && t.precision != null ? t.precision : null,
@@ -4065,7 +4078,7 @@
             'trueValues', 'falseValues', 'allowedValues', 'typeStrict', 'matchStrategy'],
         range: ['min', 'max', 'minInclusive', 'maxInclusive'],
         sms: ['caseSensitive', 'trim', 'stripSpaces'],
-        numberFormat: ['decimalSeparator', 'groupingSeparators'],
+        numberFormat: ['decimalSeparator', 'groupingSeparators', 'allowBareDecimal'],
         compositeKey: ['columns', 'nullsAllowed', 'severity'],
         rowCheck: ['name', 'type', 'severity', 'fieldA', 'fieldB', 'op', 'if', 'then', 'fields', 'expected', 'fn', 'params'],
         ifBlock: ['field', 'op', 'value'],
@@ -4336,7 +4349,7 @@
         return refs;
     }
 
-    const BUILDER_DEFAULT_SEED = { meta: { schemaVersion: '1.1.0', name: '' }, columns: {} };
+    const BUILDER_DEFAULT_SEED = { meta: { schemaVersion: '1.2.0', name: '' }, columns: {} };
 
     function createConfigBuilder(seed) {
         if (seed !== undefined && seed !== null && !isObj(seed)) {
@@ -4562,7 +4575,12 @@
                 w = w.slice(0, first) + '.' + w.slice(first + fmt.decimalSeparator.length);
             }
         }
-        return FLOAT_RE.test(w) ? w : null;
+        if (FLOAT_RE.test(w)) return w;
+        // §3.5 bare decimal (1.2.0): the working copy canonicalizes ".85" → "0.85"
+        if (fmt.allowBareDecimal === true && /^[+-]?\.[0-9]+$/.test(w)) {
+            return (w[0] === '+' || w[0] === '-') ? w[0] + '0' + w.slice(1) : '0' + w;
+        }
+        return null;
     }
 
     // convert a schemaFail marker thrown by a shared shape checker into an I-rule error
@@ -5362,28 +5380,45 @@
     // Fixed candidate null tokens (Addendum §C.3) — adopted per column on observation
     const INFER_NULL_TOKENS = ['NA', 'N/A', 'null', 'NULL', '-'];
 
-    // Fixed candidate NumberFormats, tried in order (Addendum §C.4 step 4)
-    const INFER_NUMBER_FORMATS = [
+    // Fixed candidate NumberFormats, tried in order (Addendum §C.4 step 4). Candidates
+    // 6–10 (1.2.0) are 1–5 with allowBareDecimal — appended AFTER every strict candidate
+    // so the tightest accepted format wins; bare variants only win when a participant
+    // actually lacks the integer part (".85").
+    const INFER_NUMBER_FORMATS_STRICT = [
         { decimalSeparator: '.', groupingSeparators: [','] },
         { decimalSeparator: ',', groupingSeparators: ['.'] },
         { decimalSeparator: ',', groupingSeparators: [' '] },
         { decimalSeparator: '.', groupingSeparators: [' '] },
         { decimalSeparator: '.', groupingSeparators: ["'"] },
     ];
+    const INFER_NUMBER_FORMATS = INFER_NUMBER_FORMATS_STRICT.concat(
+        INFER_NUMBER_FORMATS_STRICT.map((f) => Object.assign({}, f, { allowBareDecimal: true })));
 
     // Fixed temporal candidate tables, tried date → time → datetime (Addendum §C.4 step 5).
     // The 1.1.0 additions are appended after every 1.0.0 candidate so no 1.0.0 winner moves.
     const INFER_TEMPORAL_TABLES = [
-        { type: 'date', formats: ['yyyy-MM-dd', 'dd.MM.yyyy', 'dd/MM/yyyy', 'MM/dd/yyyy', 'yyyyMMdd', 'dd-MM-yyyy', 'yyyy/MM/dd', 'd.M.yyyy', 'd/M/yyyy', 'M/d/yyyy'] },
+        // 1.2.0: full mixed-padding families (d.MM.yyyy etc.) appended after every earlier
+        // candidate; the family reduction below — not table position — decides among
+        // same-family accepters, so no earlier winner moves.
+        { type: 'date', formats: ['yyyy-MM-dd', 'dd.MM.yyyy', 'dd/MM/yyyy', 'MM/dd/yyyy', 'yyyyMMdd', 'dd-MM-yyyy', 'yyyy/MM/dd', 'd.M.yyyy', 'd/M/yyyy', 'M/d/yyyy',
+            'd.MM.yyyy', 'dd.M.yyyy', 'd/MM/yyyy', 'dd/M/yyyy', 'M/dd/yyyy', 'MM/d/yyyy', 'd-MM-yyyy', 'dd-M-yyyy', 'd-M-yyyy', 'yyyy-M-d', 'yyyy/M/d'] },
         { type: 'time', formats: ['HH:mm:ss', 'HH:mm', 'HH:mm:ss.SSS'] },
         { type: 'datetime', formats: ["yyyy-MM-dd'T'HH:mm:ss", 'yyyy-MM-dd HH:mm:ss', "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd'T'HH:mm:ssZZ", "yyyy-MM-dd'T'HH:mm:ss.SSSZZ", 'dd.MM.yyyy HH:mm:ss', 'dd.MM.yyyy HH:mm', 'dd/MM/yyyy HH:mm', 'MM/dd/yyyy HH:mm'] },
     ];
 
-    // §C.4 padded/unpadded twins (1.1.0): the unpadded form accepts a strict superset of
-    // its padded twin. The accepting/used sets are reduced before winner/ambiguity logic:
-    // both twins accepting the same participants → drop the unpadded (all-padded columns
-    // keep their 1.0.0 result); padded accepting a strict subset → drop the padded.
-    const INFER_TWINS = { 'd.M.yyyy': 'dd.MM.yyyy', 'd/M/yyyy': 'dd/MM/yyyy', 'M/d/yyyy': 'MM/dd/yyyy' };
+    // §C.4 candidate families (1.1.0 twins, generalized in 1.2.0): candidates identical
+    // after full unpadding form a family; within one, X GENERALIZES Y iff X's day/month
+    // tokens accept a superset (d ⊇ dd, M ⊇ MM). The accepting/used sets are reduced
+    // before winner/ambiguity logic: equal accepted sets → drop the generalization (the
+    // tightest description of the evidence wins); strict subset → drop the subset member.
+    const inferUnpad = (f) => f.split('dd').join('d').split('MM').join('M');
+    const inferDayLen = (f) => (f.includes('dd') ? 2 : 1);
+    const inferMonthLen = (f) => (f.includes('MM') ? 2 : 1);
+    function inferGeneralizes(x, y) {
+        if (x === y || inferUnpad(x) !== inferUnpad(y)) return false;
+        const dx = inferDayLen(x), dy = inferDayLen(y), mx = inferMonthLen(x), my = inferMonthLen(y);
+        return dx <= dy && mx <= my && (dx < dy || mx < my);
+    }
 
     // Inference-only well-formed-grouping acceptance (Addendum §C.4 step 4): grouping
     // separators must partition the integer part into a 1–3 digit lead + exactly-3-digit
@@ -5394,7 +5429,10 @@
     const INFER_FMT_RES = INFER_NUMBER_FORMATS.map((f) => {
         const g = escRe(f.groupingSeparators[0]);
         const d = escRe(f.decimalSeparator);
-        return new RegExp(`^[+-]?(?:[0-9]+|[0-9]{1,3}(?:${g}[0-9]{3})+)(?:${d}[0-9]+)?$`);
+        // bare-decimal candidates (§C.4, 1.2.0): also accept D-digits with no integer
+        // part — never with grouping (nothing to group without an integer part)
+        const bare = f.allowBareDecimal ? `|${d}[0-9]+` : '';
+        return new RegExp(`^[+-]?(?:(?:[0-9]+|[0-9]{1,3}(?:${g}[0-9]{3})+)(?:${d}[0-9]+)?${bare})$`);
     });
 
     function inferInterpretNumber(str, fmtIndex) {
@@ -5576,12 +5614,20 @@
 
         // ---- step 5: temporal (requires the Luxon binding; skipped — and reported — without it)
         if (lux && participants.every(isStr)) {
-            const valid = (pv, f) => lux.DateTime.fromFormat(pv, f, { zone: 'utc' }).isValid;
+            // parse cache: each (value, format) pair hits Luxon once — this is what makes
+            // exhaustive mode (§C.2, 1.2.0) affordable on low-cardinality columns
+            const vcache = new Map();
+            const valid = (pv, f) => {
+                const k = f + ' ' + pv;
+                let r = vcache.get(k);
+                if (r === undefined) { r = lux.DateTime.fromFormat(pv, f, { zone: 'utc' }).isValid; vcache.set(k, r); }
+                return r;
+            };
             for (const table of INFER_TEMPORAL_TABLES) {
-                // twin reduction, full-acceptance path: both twins accepting ALL participants
-                // means equal accepted sets → the unpadded twin is dropped (§C.4, 1.1.0)
+                // family reduction, full-acceptance path: all accepters accept everything,
+                // so accepted sets are equal → drop every generalization (§C.4, 1.2.0)
                 const accepting = table.formats.filter((f) => participants.every((pv) => valid(pv, f)))
-                    .filter((f, _, arr) => !(INFER_TWINS[f] && arr.includes(INFER_TWINS[f])));
+                    .filter((f, _, arr) => !arr.some((y) => inferGeneralizes(f, y)));
                 if (accepting.length > 0) {
                     const winnerFmt = accepting[0];
                     const millis = participants.map((pv) => lux.DateTime.fromFormat(pv, winnerFmt, { zone: 'utc' }).toMillis());
@@ -5608,23 +5654,16 @@
                 // a mixed-format temporal; the draft carries every candidate that accepts at
                 // least one participant, winner (most participants; tie → table order) first.
                 if (allAcceptingFormats) {
-                    // twin reduction, union path (§C.4): the unpadded twin accepts a superset
-                    // of the padded twin's participants — equal accepted sets drop the
-                    // UNPADDED member (1.0.0 outputs stay identical), a strict superset
-                    // drops the PADDED member (it contributes nothing the unpadded lacks)
+                    // family reduction, union path (§C.4, 1.2.0): within a family the
+                    // generalization's accepted set is a structural superset, so size
+                    // comparison is exact — a generalization adding nothing is dropped
+                    // (tightest wins), a member strictly weaker than its generalization
+                    // is dropped (it contributes nothing the generalization lacks)
                     const nAccepted = (f) => participants.reduce((n, pv) => n + (valid(pv, f) ? 1 : 0), 0);
                     const used = table.formats.filter((f) => participants.some((pv) => valid(pv, f)))
-                        .filter((f, _, arr) => {
-                            const twinPadded = INFER_TWINS[f];
-                            if (twinPadded && arr.includes(twinPadded)) {
-                                return nAccepted(f) > nAccepted(twinPadded);       // unpadded stays only on strict superset
-                            }
-                            const twinUnpadded = Object.keys(INFER_TWINS).find((u) => INFER_TWINS[u] === f);
-                            if (twinUnpadded && arr.includes(twinUnpadded)) {
-                                return nAccepted(f) === nAccepted(twinUnpadded);   // padded stays unless strictly beaten
-                            }
-                            return true;
-                        });
+                        .filter((f, _, arr) => !arr.some((o) =>
+                            (inferGeneralizes(f, o) && nAccepted(f) === nAccepted(o)) ||
+                            (inferGeneralizes(o, f) && nAccepted(f) < nAccepted(o))));
                     if (used.length > 1 && participants.every((pv) => used.some((f) => valid(pv, f)))) {
                         const acceptCount = new Map(used.map((f) => [f, participants.filter((pv) => valid(pv, f)).length]));
                         const winner = used.reduce((w, f) => acceptCount.get(f) > acceptCount.get(w) ? f : w, used[0]);
@@ -5692,13 +5731,14 @@
         if (!isStr(name) || name.length === 0) {
             throw new TableValidationConfigError('options.name must be a non-empty string');
         }
-        for (const k of ['suggestRanges', 'suggestPrecision', 'seedComparison', 'allAcceptingFormats']) {
+        for (const k of ['suggestRanges', 'suggestPrecision', 'seedComparison', 'allAcceptingFormats', 'exhaustive']) {
             if (o[k] !== undefined && !isBool(o[k])) throw new TableValidationConfigError(`options.${k} must be a boolean`);
         }
         const suggestRanges = o.suggestRanges === true;
         const suggestPrecision = o.suggestPrecision !== false;                                     // §C.10: default true (1.1.0)
         const seedComparison = o.seedComparison === true;
         const allAcceptingFormats = o.allAcceptingFormats === true;
+        const exhaustive = o.exhaustive === true;                                                  // §C.2 (1.2.0)
 
         // column count: headers when present, else the widest row of the WHOLE table (§C.7)
         const colCount = headers !== null ? headers.length
@@ -5727,7 +5767,7 @@
         const colNames = [];
         for (let i = 0; i < colCount; i++) colNames.push(useByName ? headers[i] : `col_${i}`);
 
-        const sample = rows.slice(0, Math.min(sampleRows, rows.length));
+        const sample = exhaustive ? rows : rows.slice(0, Math.min(sampleRows, rows.length));   // §C.2 exhaustive (1.2.0)
 
         // ---- per-column inference
         const colReports = [];
@@ -5783,7 +5823,7 @@
                     reliedOnInterpretation: c.relied,
                 },
                 candidateKey,
-                sampleDerivedNullability: c.nulls === 0,
+                sampleDerivedNullability: exhaustive ? false : c.nulls === 0,   // exhaustive: a whole-table fact (§C.2)
             });
         }
 
@@ -5792,7 +5832,7 @@
         const nullEquivalents = [''].concat(INFER_NULL_TOKENS.filter((t) => adoptedUnion.has(t)));
         const draft = {
             meta: {
-                schemaVersion: '1.1.0',
+                schemaVersion: '1.2.0',
                 name,
                 description: 'Draft inferred from sample data; review before use.',
             },
@@ -5811,7 +5851,7 @@
         return {
             draft: canonicalizeConfig(draft),
             report: {
-                sample: { rowsAvailable: rows.length, rowsSampled: sample.length },
+                sample: { rowsAvailable: rows.length, rowsSampled: sample.length, exhaustive },
                 columns: colReports,
                 candidateKeys,
                 noSingleColumnKey: candidateKeys.length === 0,

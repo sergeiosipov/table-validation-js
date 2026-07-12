@@ -324,6 +324,8 @@
             h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: o.seedComparison, onchange: (e) => store.dispatch.setInferOption('seedComparison', e.target.checked) }), 'seed comparison'),
             h('label', { class: 'inline', title: 'Draft every accepting temporal format (winner first); mixed-format date columns infer via union coverage (Addendum §C.4)' },
                 h('input', { type: 'checkbox', checked: o.allAcceptingFormats, onchange: (e) => store.dispatch.setInferOption('allAcceptingFormats', e.target.checked) }), 'all accepting formats'),
+            h('label', { class: 'inline', title: 'Evaluate EVERY row instead of the sampleRows prefix (Addendum §C.2) — conclusions become facts of the whole table; slower on very large tables' },
+                h('input', { type: 'checkbox', checked: o.exhaustive, onchange: (e) => store.dispatch.setInferOption('exhaustive', e.target.checked) }), 'exhaustive (all rows)'),
             h('button', { class: 'primary', onclick: () => store.dispatch.inferRun() },
                 noColumns ? 'Infer draft config' : 'Re-infer (replaces the draft)'));
 

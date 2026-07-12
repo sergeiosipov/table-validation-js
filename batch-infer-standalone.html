@@ -6,7 +6,7 @@
     <title>Table Validation — Batch Config Inference</title>
     <!-- STANDALONE TOOL: infer a draft config for MANY files at once and save them
          all as one ZIP. Single hand-authored file — send it anywhere; the engine and
-         libraries load from CDN (the engine pinned to the immutable v1.0.0 tag with
+         libraries load from CDN (the engine pinned to the immutable v1.2.0 tag with
          subresource integrity). Files are read locally in the browser and never leave
          the machine; the only network access is cdn.jsdelivr.net.
 
@@ -73,6 +73,7 @@
         <br>
         <label class="inline">sampleRows <input id="optSample" type="text" class="narrow" value="1000"></label>
         <label class="inline"><input id="optAllFmt" type="checkbox" checked> all accepting formats</label>
+        <label class="inline" title="Evaluate every row instead of the first sampleRows — slower on huge files, but conclusions are facts of the whole table"><input id="optExh" type="checkbox"> exhaustive (all rows)</label>
         <label class="inline"><input id="optRanges" type="checkbox"> suggest ranges</label>
         <label class="inline" title="Draft observed decimal-precision bounds on float columns (default on — decimal places are contract-like)"><input id="optPrec" type="checkbox" checked> suggest precision</label>
         <label class="inline"><input id="optSeedCmp" type="checkbox"> seed comparison</label>
@@ -107,8 +108,8 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"
         integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
         crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.1.0/dist/table-validation.js"
-        integrity="sha384-ciDfSszNj9gSwXo3ZI824IL4hSOYPnPftazTkq/Jm54jQFpSTDiDGTN8HbVYw8Hh"
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.2.0/dist/table-validation.js"
+        integrity="sha384-Pt7Nwn2TI1VJ1O65QrRWC6TC0HdJHA+j8ZM9jFQwfrEXqDKXSVQmPs1Sh+5KKRWz"
         crossorigin="anonymous"></script>
 <script>
 'use strict';
@@ -178,6 +179,7 @@
                 suggestPrecision: $('optPrec').checked,
                 seedComparison: $('optSeedCmp').checked,
                 allAcceptingFormats: $('optAllFmt').checked,
+                exhaustive: $('optExh').checked,
             });
             e.draft = out.draft;
             e.report = out.report;
@@ -225,7 +227,7 @@
                 delimiter: $('optDelim').value, encoding: $('optEnc').value, sheet: $('optSheet').value,
                 sampleRows: $('optSample').value, allAcceptingFormats: $('optAllFmt').checked,
                 suggestRanges: $('optRanges').checked, suggestPrecision: $('optPrec').checked,
-                seedComparison: $('optSeedCmp').checked,
+                seedComparison: $('optSeedCmp').checked, exhaustive: $('optExh').checked,
             },
             files: [],
         };
@@ -265,7 +267,14 @@
     function fmtOf(colDef) {
         const f = colDef.type.formats;
         if (!f) return '';
-        return f.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(', ');
+        return f.map((x) => {
+            if (typeof x === 'string') return x;                          // temporal token format
+            const parts = [];                                             // NumberFormat, human-readable
+            if (x.decimalSeparator != null) parts.push('decimal "' + x.decimalSeparator + '"');
+            if ((x.groupingSeparators || []).length) parts.push('grouping "' + x.groupingSeparators.join('') + '"');
+            if (x.allowBareDecimal) parts.push('bare decimals (.85)');
+            return parts.join(' · ') || JSON.stringify(x);
+        }).join(', ');
     }
 
     async function makeXlsx() {

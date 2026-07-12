@@ -11,12 +11,12 @@ contracts (Core Specification, Authoring/Ingestion/Inference Addendum, Design-De
 Log) live in the companion spec repository
 [`table-validation-spec`](https://github.com/sergeiosipov/table-validation-spec)
 (private; see [Specs](#specs)). The JS-specific documents — the
-[Browser JS profile](table-validation-js-impl-spec-v1.1.0.md) and the
-[console UI architecture](table-validation-ui-architecture-v1.1.0.md) — live in this
+[Browser JS profile](table-validation-js-impl-spec-v1.2.0.md) and the
+[console UI architecture](table-validation-ui-architecture-v1.2.0.md) — live in this
 repository.
 
-[`dist/table-validation.js`](dist/table-validation.js) implements **Core Spec 1.1.0** in full
-(`VERSION === SPEC_VERSION === "1.1.0"`): the validation engine, the `compare()` comparison engine,
+[`dist/table-validation.js`](dist/table-validation.js) implements **Core Spec 1.2.0** in full
+(`VERSION === SPEC_VERSION === "1.2.0"`): the validation engine, the `compare()` comparison engine,
 the `{error, warning}` + abort severity model, per-rule/structural severities, `stopOnFail`/
 `stopPolicy`, message-template overrides, cell observations, the XLSX / annotated / comparison
 exporters — and the three tooling modules of the spec set's addendum: the **config meta-model &
@@ -46,7 +46,7 @@ The intended consumer is a locked-down corporate machine with a browser, a netwo
 to `cdn.jsdelivr.net`, and nothing else — no npm, no node, no Python:
 
 1. Download the release archive of the pinned tag
-   (`https://github.com/sergeiosipov/table-validation-js/archive/refs/tags/v1.1.0.zip`)
+   (`https://github.com/sergeiosipov/table-validation-js/archive/refs/tags/v1.2.0.zip`)
    and unzip it anywhere — or copy the folder from any machine that can.
 2. Double-click [`console.html`](console.html) — the full Authoring & Run Console, from
    `file://`. Double-click [`docs/user-guide.html`](docs/user-guide.html) — the user
@@ -58,7 +58,7 @@ to `cdn.jsdelivr.net`, and nothing else — no npm, no node, no Python:
 two single-file variants pull everything else from the pinned CDN tag:
 
 - [`console-standalone.html`](console-standalone.html) — the entire console in one file;
-  the engine and console scripts load from `…@v1.1.0` on jsDelivr, each with a sha384
+  the engine and console scripts load from `…@v1.2.0` on jsDelivr, each with a sha384
   `integrity` attribute, so a tampered CDN response is refused by the browser. Engines
   run on the main thread (a single file has no sibling worker script).
 - [`docs/user-guide-standalone.html`](docs/user-guide-standalone.html) — the guide in one
@@ -96,25 +96,26 @@ Dependencies are read from `globalThis` at call time only, so ordering relative 
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js"></script>       <!-- exportXlsx only -->
 <script src="dist/table-validation.js"></script>
 <!-- or pinned from the CDN with integrity checking (see "CDN & SRI" below):
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.1.0/dist/table-validation.js"
-        integrity="sha384-ciDfSszNj9gSwXo3ZI824IL4hSOYPnPftazTkq/Jm54jQFpSTDiDGTN8HbVYw8Hh" crossorigin="anonymous"></script> -->
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.2.0/dist/table-validation.js"
+        integrity="sha384-Pt7Nwn2TI1VJ1O65QrRWC6TC0HdJHA+j8ZM9jFQwfrEXqDKXSVQmPs1Sh+5KKRWz" crossorigin="anonymous"></script> -->
 ```
 
-## CDN & SRI (v1.1.0)
+## CDN & SRI (v1.2.0)
 
 Tags are immutable — pin the exact version and verify it:
 
 | Artifact | jsDelivr URL | `integrity` (sha384) |
 |---|---|---|
-| engine | `https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.1.0/dist/table-validation.js` | `sha384-ciDfSszNj9gSwXo3ZI824IL4hSOYPnPftazTkq/Jm54jQFpSTDiDGTN8HbVYw8Hh` |
-| worker wrapper | `https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.1.0/dist/table-validation-worker.js` | `sha384-MhaZEGiWpasTUvZeJRXLCXcoI1DlgkcYpt4+qDQAsRbPOhRXEkHR7TSoZQtXrLcr` |
-| TypeScript declarations | `https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.1.0/dist/table-validation.d.ts` | — (not `<script>`-loaded) |
+| engine | `https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.2.0/dist/table-validation.js` | `sha384-Pt7Nwn2TI1VJ1O65QrRWC6TC0HdJHA+j8ZM9jFQwfrEXqDKXSVQmPs1Sh+5KKRWz` |
+| worker wrapper | `https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.2.0/dist/table-validation-worker.js` | `sha384-jO+y/rij+1KHpFIaLF1WhLPPyMkdtGvFmQX0YpPZ3IXvH1ZpXw2KeaNviMtq/xGQ` |
+| TypeScript declarations | `https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.2.0/dist/table-validation.d.ts` | — (not `<script>`-loaded) |
 
 `node test/release-check.js` recomputes these hashes; any post-tag fix ships as a new
 patch tag (never re-tag changed content — CDNs cache exact-version URLs permanently).
-v1.0.0 pins keep working forever (tags are immutable); v1.1.0 adds unpadded `d`/`M`
-date tokens, wider inference date candidates with a digit-date guard, and
-`suggestPrecision` (see the spec set's addendum §C).
+Older pins keep working forever (tags are immutable). v1.1.0 added unpadded `d`/`M`
+date tokens, wider date candidates with a digit-date guard, and `suggestPrecision`;
+v1.2.0 adds `NumberFormat.allowBareDecimal` (`.85` as 0.85, opt-in), mixed-padding
+date families with tightest-format-wins reduction, and exhaustive inference mode.
 
 The engine core (structure, string/int/float/bool/categorical columns) works with neither
 dependency present. A missing `luxon` only throws when a schema actually declares temporal
@@ -174,7 +175,7 @@ API surface: `TableValidation.validate(schema, table, options)`,
 `adapters.fromArrays` / `adapters.fromObjects`,
 `configModel` / `createConfigBuilder(seed?)`, `ingest(source, spec, options?)` (Promise\<IngestResult\>), `normalizationModel`,
 `inferConfig(table, options?)`, `TableValidationConfigError`, `TableValidationIngestError`,
-`VERSION` (`"1.1.0"`), `SPEC_VERSION` (`"1.1.0"`).
+`VERSION` (`"1.2.0"`), `SPEC_VERSION` (`"1.2.0"`).
 
 Rule of thumb: **thrown = you called the API wrong; violations in the result = the schema or
 data is wrong.** Schema *content* errors surface as `schemaValidationError` violations with
@@ -196,7 +197,7 @@ normalization, §C for inference):
 | **Report titles / metadata above the header; totals rows below** | `IngestSpec.skipRows` / `skipFooterRows` (Addendum §B.4) — actual dropped counts land in provenance |
 | **Merged / blank repeating keys** (un-pivoting: region written once per block) | normalization `fillDown` (per-column; `treatAsEmpty` for `"-"`-style placeholders) |
 | **NBSP, en/em dashes, curly quotes** (Word/Excel artifacts) | normalization `replaceChars` with an exact substitution map |
-| **Regional number separators** (`1.234,50`, `1 234,50`) | `formats: [NumberFormat]` on int/float columns (accept without transforming), or normalization `reformatNumber` (canonicalize; lexical precision preserved) |
+| **Regional number separators** (`1.234,50`, `1 234,50`) — and **bare decimals** (`.85`) | `formats: [NumberFormat]` on int/float columns (accept without transforming; `allowBareDecimal: true` for `.85`-style values), or normalization `reformatNumber` (canonicalize; `.85` → `0.85`, lexical precision preserved) |
 | **Mixed date spellings in one column** (`2026-07-15` next to `16.07.2026`) | list several `formats` on the temporal column — or let inference draft them with `inferConfig(…, { allAcceptingFormats: true })` (Addendum §C.4 union coverage) |
 | **Null-token zoos** (`NA`, `N/A`, `null`, `-`, `""`) | `nullHandling.nullEquivalents` (recognition, no rewriting); inference adopts observed tokens into its draft; normalization `nullCoerce` when you want real nulls in the output |
 | **Duplicate headers** | `structure.duplicateColumnNames.strategy` (`halt` / `rename` / `keepFirst`) |
@@ -209,7 +210,7 @@ normalization, §C for inference):
 ## The console
 
 [`console.html`](console.html) is the **Authoring & Run Console** — the HTML interface
-implementing the [UI architecture spec](table-validation-ui-architecture-v1.1.0.md) on top of the
+implementing the [UI architecture spec](table-validation-ui-architecture-v1.2.0.md) on top of the
 engine and the tooling modules. Open it in any browser (`file://` works; Luxon/ExcelJS load
 from CDN). New to it? Start with the **[user guide](docs/user-guide.md)** — task-oriented,
 screenshot-verified, with worked examples in [`docs/examples/`](docs/examples/orders-raw.csv);
@@ -313,23 +314,23 @@ Where the specs leave latitude, this implementation chose:
 
 ## Specs
 
-The specification set shares the unified version **1.1.0**, and
+The specification set shares the unified version **1.2.0**, and
 [`dist/table-validation.js`](dist/table-validation.js) implements it
-(`VERSION === SPEC_VERSION === "1.1.0"`). The documents are split by audience:
+(`VERSION === SPEC_VERSION === "1.2.0"`). The documents are split by audience:
 
 **In this repository (JS-specific):**
 
-- [Browser JS Implementation Specification v1.1.0](table-validation-js-impl-spec-v1.1.0.md) — API, bindings, packaging, incl. `configModel`/`createConfigBuilder`, `ingest`, `inferConfig` (§3.11–§3.13)
-- [Authoring & Run Console — UI Architecture v1.1.0](table-validation-ui-architecture-v1.1.0.md) — the user-facing tool tying authoring/ingestion/inference to the engines; §11 is the normative **full-surface coverage matrix** — every public API capability mapped to a UI affordance, all-local static files, deps CDN-only
+- [Browser JS Implementation Specification v1.2.0](table-validation-js-impl-spec-v1.2.0.md) — API, bindings, packaging, incl. `configModel`/`createConfigBuilder`, `ingest`, `inferConfig` (§3.11–§3.13)
+- [Authoring & Run Console — UI Architecture v1.2.0](table-validation-ui-architecture-v1.2.0.md) — the user-facing tool tying authoring/ingestion/inference to the engines; §11 is the normative **full-surface coverage matrix** — every public API capability mapped to a UI affordance, all-local static files, deps CDN-only
 - [Benchmarks](docs/benchmarks.md) — measured `validate()`/`compare()` performance at 10⁴–10⁷ cells in Node and Chromium, scale guidance, and how to rerun the harness (browser, zero toolchain)
 
 **In the companion spec repository** (language-agnostic, source of truth —
 [`table-validation-spec`](https://github.com/sergeiosipov/table-validation-spec), currently
 private, so these links require access):
 
-- [Core Specification v1.1.0](https://github.com/sergeiosipov/table-validation-spec/blob/v1.1.0/table-validation-core-spec-v1.1.0.md) — behavior (normative), incl. the comparison engine (§15) and the §16 anchor for the addendum
-- [Authoring, Ingestion & Inference Addendum v1.1.0](https://github.com/sergeiosipov/table-validation-spec/blob/v1.1.0/table-validation-authoring-tooling-addendum-v1.1.0.md) — normative core companion: config meta-model & builder (§A), `ingest()` + normalization pipeline (§B), `inferConfig()` (§C)
-- [Design-Decisions Log](https://github.com/sergeiosipov/table-validation-spec/blob/v1.1.0/table-validation-design-decisions-v1.1.0.md) — non-normative record of every resolved ambiguity, with the genuine forks flagged
+- [Core Specification v1.2.0](https://github.com/sergeiosipov/table-validation-spec/blob/v1.2.0/table-validation-core-spec-v1.2.0.md) — behavior (normative), incl. the comparison engine (§15) and the §16 anchor for the addendum
+- [Authoring, Ingestion & Inference Addendum v1.2.0](https://github.com/sergeiosipov/table-validation-spec/blob/v1.2.0/table-validation-authoring-tooling-addendum-v1.2.0.md) — normative core companion: config meta-model & builder (§A), `ingest()` + normalization pipeline (§B), `inferConfig()` (§C)
+- [Design-Decisions Log](https://github.com/sergeiosipov/table-validation-spec/blob/v1.2.0/table-validation-design-decisions-v1.2.0.md) — non-normative record of every resolved ambiguity, with the genuine forks flagged
 
 ## License
 

@@ -172,7 +172,7 @@
             const a = TV().inferConfig(t, { sampleRows: 10 });
             const b = TV().inferConfig(t, { sampleRows: 10 });
             assert(JSON.stringify(a) === JSON.stringify(b), 'deterministic across runs');
-            assertEq(a.report.sample, { rowsAvailable: 50, rowsSampled: 10 }, 'bounded prefix sample');
+            assertEq(a.report.sample, { rowsAvailable: 50, rowsSampled: 10, exhaustive: false }, 'bounded prefix sample');
             assertEq(a.draft.structure.columnMatching, 'byPosition', 'headerless → byPosition');
             assertEq(Object.keys(a.draft.columns), ['col_0', 'col_1'], 'positional logical names');
             assertEq(a.draft.columns.col_0.required, undefined, 'N6: required never emitted');
@@ -352,6 +352,84 @@
             const dInTime = TV().createConfigBuilder({ meta: { schemaVersion: '1.1.0', name: 'x' },
                 columns: { c: { type: { name: 'time', formats: ['d HH:mm'] } } } }).validate();
             assert(!dInTime.valid, 'a day token in a time format is still rejected');
+        },
+    });
+
+
+    // ---------------- v1.2.0: bare decimals, mixed-padding families, exhaustive ----------------
+
+    U.push({
+        suite, name: 'allowBareDecimal (1.2.0): ".85"-style floats infer, validate, and stay opt-in',
+        fn: ({ assert, assertEq }) => {
+            const t = { headers: ['v'], rows: [['.85'], ['.02'], ['0'], ['6.16']] };
+            const r = TV().inferConfig(t);
+            assertEq(r.report.columns[0].inferredType, 'float', 'bare decimals infer float');
+            assertEq(r.draft.columns.v.type.formats,
+                [{ decimalSeparator: '.', groupingSeparators: [','], allowBareDecimal: true }],
+                'the bare-decimal NumberFormat is drafted');
+            assertEq(r.draft.columns.v.type.precision,
+                { min: 0, max: 2, minInclusive: true, maxInclusive: true }, 'precision from fractional digits');
+            assertN1(assert, r.draft, 'bare');
+            assert(TV().validate(r.draft, t).valid, 'round-trip: the draft validates its own sample');
+            assert(!TV().validate(r.draft, { headers: ['v'], rows: [['.855']] }).valid,
+                'drafted precision still bites on a bare decimal');
+            // opt-in: without the flag the base grammar keeps rejecting bare decimals
+            const strict = { meta: { schemaVersion: '1.2.0', name: 'x' }, evaluation: { strictType: false },
+                columns: { v: { type: { name: 'float', formats: [{ decimalSeparator: '.', groupingSeparators: [','] }] } } } };
+            assert(!TV().validate(strict, { headers: ['v'], rows: [['.85']] }).valid, 'without the flag .85 stays a typeMismatch');
+            // ordinary formatted numbers keep drafting the STRICT candidate (tightest wins)
+            const de = TV().inferConfig({ headers: ['v'], rows: [['1.234,50'], ['2,25']] });
+            assertEq(de.draft.columns.v.type.formats,
+                [{ decimalSeparator: ',', groupingSeparators: ['.'] }], 'strict candidates still win for ordinary data');
+            // rule 12: bad shapes rejected
+            const badBool = TV().createConfigBuilder({ meta: { schemaVersion: '1.2.0', name: 'x' },
+                columns: { v: { type: { name: 'float', formats: [{ decimalSeparator: '.', groupingSeparators: [], allowBareDecimal: 'yes' }] } } } }).validate();
+            assert(!badBool.valid, 'allowBareDecimal must be a boolean');
+            const nullDs = TV().createConfigBuilder({ meta: { schemaVersion: '1.2.0', name: 'x' },
+                columns: { v: { type: { name: 'float', formats: [{ decimalSeparator: null, groupingSeparators: [' '], allowBareDecimal: true }] } } } }).validate();
+            assert(!nullDs.valid, 'allowBareDecimal: true requires a non-null decimalSeparator');
+        },
+    });
+
+    U.push({
+        suite, name: 'mixed-padding families (1.2.0): tightest accepting format wins within a family',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            // the reported case: day sometimes unpadded, month ALWAYS padded → d/MM, not d/M
+            const rep = TV().inferConfig({ headers: ['d'], rows: [['1/01/2026'], ['22/12/2026']] });
+            assertEq(rep.draft.columns.d.type.formats, ['d/MM/yyyy'], 'd/MM/yyyy — tightest fit for the evidence');
+            assertEq(rep.report.columns[0].confidence, 'high', 'sole survivor after family reduction');
+            assert(TV().validate(rep.draft, { headers: ['d'], rows: [['1/01/2026'], ['22/12/2026']] }).valid,
+                'the tighter draft validates the sample');
+            // all-padded and fully-unpadded columns are unchanged from 1.1.0
+            const padded = TV().inferConfig({ headers: ['d'], rows: [['15.07.2026'], ['03.12.2026']] });
+            assertEq(padded.draft.columns.d.type.formats, ['dd.MM.yyyy'], 'all-padded winner unchanged');
+            const loose = TV().inferConfig({ headers: ['d'], rows: [['1.7.2026'], ['15.07.2026']] });
+            assertEq(loose.draft.columns.d.type.formats, ['d.M.yyyy'], 'fully-mixed winner unchanged');
+            // ISO-order families gain unpadded members
+            const isoU = TV().inferConfig({ headers: ['d'], rows: [['2026-7-5'], ['2026-11-30']] });
+            assertEq(isoU.draft.columns.d.type.formats, ['yyyy-M-d'], 'unpadded ISO order infers');
+            const iso = TV().inferConfig({ headers: ['d'], rows: [['2026-07-05'], ['2026-11-30']] });
+            assertEq(iso.draft.columns.d.type.formats, ['yyyy-MM-dd'], 'padded ISO unchanged');
+        },
+    });
+
+    U.push({
+        suite, name: 'exhaustive mode (1.2.0): whole-table inference, no sampling',
+        fn: ({ assert, assertEq }) => {
+            // 2 500 rows; the type-breaking values sit beyond the 1 000-row sample
+            const rows = Array.from({ length: 2500 }, (_, i) => [i < 2400 ? String(i + 1) : 'x' + i]);
+            const t = { headers: ['a'], rows };
+            const sampled = TV().inferConfig(t);
+            assertEq(sampled.report.columns[0].inferredType, 'int', 'the prefix sample sees only ints');
+            assertEq(sampled.report.sample, { rowsAvailable: 2500, rowsSampled: 1000, exhaustive: false }, 'sample shape');
+            const ex = TV().inferConfig(t, { exhaustive: true });
+            assertEq(ex.report.columns[0].inferredType, 'string', 'exhaustive sees the tail and demotes honestly');
+            assertEq(ex.report.sample, { rowsAvailable: 2500, rowsSampled: 2500, exhaustive: true }, 'whole table sampled');
+            assertEq(ex.report.columns[0].sampleDerivedNullability, false,
+                'exhaustive conclusions are facts of the data, not of a prefix');
+            assertN1(assert, ex.draft, 'exhaustive');
+            assert(JSON.stringify(TV().inferConfig(t, { exhaustive: true })) === JSON.stringify(ex), 'deterministic');
         },
     });
 
