@@ -1,0 +1,77 @@
+{
+  "meta": {
+    "schemaVersion": "1.0.0",
+    "name": "orders",
+    "description": "Draft inferred from sample data; review before use."
+  },
+  "nullHandling": {
+    "nullEquivalents": [
+      ""
+    ]
+  },
+  "evaluation": {
+    "strictType": false,
+    "timezone": "utc"
+  },
+  "structure": {
+    "columnMatching": "byName",
+    "columnCount": {
+      "min": 5,
+      "max": 5,
+      "minInclusive": true,
+      "maxInclusive": true
+    }
+  },
+  "columns": {
+    "order_id": {
+      "nullable": false,
+      "unique": {
+        "enabled": true
+      },
+      "type": {
+        "name": "int"
+      }
+    },
+    "region": {
+      "nullable": false,
+      "type": {
+        "name": "string"
+      }
+    },
+    "amount": {
+      "nullable": true,
+      "type": {
+        "name": "float"
+      }
+    },
+    "order_date": {
+      "nullable": false,
+      "type": {
+        "name": "date",
+        "formats": [
+          "yyyy-MM-dd"
+        ]
+      }
+    },
+    "status": {
+      "nullable": true,
+      "type": {
+        "name": "string"
+      }
+    }
+  },
+  "comparison": {
+    "match": {
+      "keys": [
+        "order_id"
+      ],
+      "onDuplicateKey": "reportAndExclude"
+    },
+    "fields": {
+      "amount": {
+        "expectedName": "Betrag",
+        "tolerance": 0.01
+      }
+    }
+  }
+}

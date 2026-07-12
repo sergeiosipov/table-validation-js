@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Table Validation — Benchmark Harness</title>
+    <style>
+        body { font: 14px/1.5 ui-monospace, Consolas, monospace; margin: 2rem; background: #111; color: #ddd; }
+        pre { white-space: pre; }
+        #status { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Benchmark harness (validate + compare, 10⁴–10⁷ cells)</h1>
+    <p>Console scale-limit / WASM-baseline numbers. Chromium exposes <code>performance.memory</code>
+       heap deltas; other browsers report n/a. Node: <code>node test/bench.js</code>.</p>
+    <div id="status">running…</div>
+    <pre id="out"></pre>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
+    <script src="../dist/table-validation.js"></script>
+    <script src="bench.js"></script>
+    <script>
+        window.addEventListener('load', async () => {
+            const out = document.getElementById('out');
+            const max = new URLSearchParams(location.search).get('maxCells');
+            const results = await window.__tvBench({ maxCells: max ? Number(max) : 1e7 },
+                (line) => { out.textContent += line + '\n'; });
+            window.__benchResults = results;
+            document.getElementById('status').textContent = 'done';
+        });
+    </script>
+</body>
+</html>

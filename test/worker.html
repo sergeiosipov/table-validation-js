@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Table Validation — Worker Protocol Suite</title>
+    <style>
+        body { font: 14px/1.5 ui-monospace, Consolas, monospace; margin: 2rem; background: #111; color: #ddd; }
+        #summary { padding: .6rem .8rem; border-radius: 6px; margin-bottom: 1rem; font-weight: bold; }
+        #summary.ok { background: #12351a; color: #7be08a; }
+        #summary.bad { background: #3a1414; color: #f08080; }
+        .test.pass { color: #7be08a; } .test.fail { color: #f08080; font-weight: bold; }
+        .note { color: #f4a9a9; white-space: pre-wrap; margin-left: 2rem; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>Worker wrapper protocol (JS profile §3.14)</h1>
+    <p>Serve this directory over http(s) — Web Workers are unavailable from <code>file://</code> pages
+       (the browser conformance suite stays file://-compatible; this page is the worker-specific add-on).</p>
+    <div id="summary">running…</div>
+    <div id="results"></div>
+    <script>
+    'use strict';
+    (async function () {
+        const out = [];
+        const push = (name, errs) => out.push({ name, errs });
+        const render = () => {
+            const fails = out.reduce((n, r) => n + (r.errs.length ? 1 : 0), 0);
+            const el = document.getElementById('summary');
+            el.className = fails ? 'bad' : 'ok';
+            el.textContent = `${fails ? '✖' : '✔'} ${out.length - fails} passed, ${fails} failed, 0 blocked — ${out.length} total`;
+            const res = document.getElementById('results');
+            for (const r of out) {
+                const d = document.createElement('div');
+                d.className = 'test ' + (r.errs.length ? 'fail' : 'pass');
+                d.textContent = `${r.errs.length ? '✖' : '✔'} ${r.name}`;
+                res.appendChild(d);
+                for (const n of r.errs) {
+                    const nd = document.createElement('div');
+                    nd.className = 'note'; nd.textContent = n;
+                    res.appendChild(nd);
+                }
+            }
+        };
+        if (location.protocol === 'file:') {
+            push('worker suite requires http(s)', ['served from file:// — start a local server']);
+            render(); return;
+        }
+
+        const worker = new Worker('../dist/table-validation-worker.js');
+        let nextId = 0;
+        const pending = new Map();
+        worker.onmessage = (ev) => {
+            const m = ev.data, p = pending.get(m.id);
+            pending.delete(m.id);
+            if (m.ok) p.resolve(m.result); else p.reject(m.error);
+        };
+        const call = (op, args) => new Promise((resolve, reject) => {
+            const id = ++nextId;
+            pending.set(id, { resolve, reject });
+            worker.postMessage({ id, op, args });
+        });
+
+        const schema = {
+            meta: { schemaVersion: '1.0.0', name: 'wk' },
+            resultConfig: { collectCellRegister: true, collectCellObservations: true },
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                id: { type: { name: 'int' }, unique: { enabled: true } },
+                day: { type: { name: 'date', formats: ['yyyy-MM-dd'] } },
+            },
+        };
+        const table = { headers: ['id', 'day'], rows: [['1', '2026-07-01'], ['1', '2026-07-02']] };
+
+        // ping
+        {
+            const errs = [];
+            try {
+                const r = await call('ping', []);
+                if (!r.version) errs.push('ping returned no version');
+            } catch (e) { errs.push('ping failed: ' + e.message); }
+            push('ping → { version }', errs);
+        }
+        // init (Luxon needed for the date column)
+        {
+            const errs = [];
+            try {
+                await call('init', [['https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js']]);
+            } catch (e) { errs.push('init failed: ' + e.message); }
+            push('init imports dependency bundles', errs);
+        }
+        // validate: full result crosses the boundary; interpreted temporals sanitized to ISO strings
+        {
+            const errs = [];
+            try {
+                const r = await call('validate', [schema, table, { referenceInstant: '2026-07-08T12:00:00Z' }]);
+                if (r.valid !== false) errs.push('expected invalid (duplicate id)');
+                if (!r.cellRegister || r.cellRegister.length < 2) errs.push('register missing');
+                const obs = (r.cellObservations || []).find((o) => o.field === 'day' && o.row === 0);
+                if (!obs || typeof obs.interpretedValue !== 'string' || !obs.interpretedValue.startsWith('2026-07-01')) {
+                    errs.push('temporal interpreted value not sanitized to an ISO string: ' + JSON.stringify(obs && obs.interpretedValue));
+                }
+                // whole result must have survived structured clone (it arrived) and be plain data
+                JSON.stringify(r);
+            } catch (e) { errs.push('validate failed: ' + (e.message || JSON.stringify(e))); }
+            push('validate over postMessage (structured-clone-safe result)', errs);
+        }
+        // compare
+        {
+            const errs = [];
+            try {
+                const cmp = JSON.parse(JSON.stringify(schema));
+                cmp.columns.id.unique = undefined;
+                cmp.comparison = { match: { keys: ['id'] } };
+                const r = await call('compare', [cmp,
+                    { headers: ['id', 'day'], rows: [['1', '2026-07-01']] },
+                    { headers: ['id', 'day'], rows: [['1', '2026-07-02']] },
+                    {}]);
+                if (r.engine !== 'compare' || !r.diff) errs.push('no diff in comparison result');
+                if (!r.diff.rows[0] || r.diff.rows[0].cells.day.tier !== 'valueMismatch') errs.push('expected valueMismatch');
+            } catch (e) { errs.push('compare failed: ' + (e.message || JSON.stringify(e))); }
+            push('compare over postMessage (diff crosses the boundary)', errs);
+        }
+        // ingest + inferConfig
+        {
+            const errs = [];
+            try {
+                const r = await call('ingest', ['a,b\n1,x\n', { format: 'csv' }, undefined]);
+                if (r.table.rows[0][0] !== '1') errs.push('ingest result wrong');
+                const inf = await call('inferConfig', [r.table, { name: 'wk' }]);
+                if (!inf.draft || inf.draft.columns.a.type.name !== 'int') errs.push('inferConfig draft wrong');
+            } catch (e) { errs.push('ingest/inferConfig failed: ' + (e.message || JSON.stringify(e))); }
+            push('ingest + inferConfig over postMessage', errs);
+        }
+        // error shape: caller errors come back as { ok:false, error } with name/code
+        {
+            const errs = [];
+            try {
+                await call('ingest', ['x', { format: 'nope' }, undefined]);
+                errs.push('expected a rejection');
+            } catch (e) {
+                if (e.name !== 'TableValidationIngestError' || e.code !== 'ingestSpecInvalid') {
+                    errs.push('wrong error shape: ' + JSON.stringify(e));
+                }
+                if (!Array.isArray(e.detail)) errs.push('detail not carried');
+            }
+            push('errors cross the boundary with name/code/detail', errs);
+        }
+        {
+            const errs = [];
+            try {
+                await call('nonsense', []);
+                errs.push('expected unknown-op rejection');
+            } catch (e) {
+                if (e.name !== 'TableValidationConfigError') errs.push('wrong error name: ' + e.name);
+            }
+            push('unknown op → TableValidationConfigError', errs);
+        }
+        render();
+    })();
+    </script>
+</body>
+</html>

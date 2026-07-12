@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Table Validation — Conformance Suite</title>
+    <style>
+        body { font: 14px/1.5 ui-monospace, Consolas, monospace; margin: 2rem; background: #111; color: #ddd; }
+        h1 { font-size: 1.2rem; }
+        h2 { font-size: 1rem; margin: 1.2rem 0 .3rem; color: #8ab; border-bottom: 1px solid #333; }
+        #summary { padding: .6rem .8rem; border-radius: 6px; margin-bottom: 1rem; font-weight: bold; }
+        #summary.ok { background: #12351a; color: #7be08a; }
+        #summary.bad { background: #3a1414; color: #f08080; }
+        .test.pass { color: #7be08a; }
+        .test.fail { color: #f08080; font-weight: bold; }
+        .test.blocked { color: #d8b45a; }
+        .note { color: #f4a9a9; white-space: pre-wrap; margin: 0 0 .4rem 2rem; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>Table Validation Engine — Conformance Suite (Core Spec 1.0.0, Browser JS profile)</h1>
+    <p>Open this file in any browser (<code>file://</code> works). Luxon &amp; ExcelJS load from CDN;
+       without network, temporal/export tests report as <em>blocked</em>.</p>
+    <div id="summary">running…</div>
+    <div id="results"></div>
+
+    <script>window.__VECTORS__ = []; window.__UNIT__ = [];</script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js"></script>
+    <script>
+        // Load engine + vectors + runner in order, cache-busted so every reload is fresh.
+        (function () {
+            const v = '?cb=' + Date.now();
+            const files = [
+                '../dist/table-validation.js',
+                'vectors/schema-phase.js', 'vectors/structural.js', 'vectors/cell.js',
+                'vectors/parser-negatives.js', 'vectors/aggregate.js', 'vectors/row-checks.js',
+                'vectors/table-checks.js', 'vectors/breakers.js', 'vectors/temporal.js',
+                'vectors/comparison.js', 'vectors/unit.js',
+                'vectors/authoring.js', 'vectors/ingest.js', 'vectors/infer.js',
+                'vectors/quality.js', 'vectors/corpus.js', 'vectors/fuzz.js', 'vectors/mutation.js',
+                'runner.js',
+            ];
+            document.write(files.map((f) => `<scr` + `ipt src="${f}${v}"></scr` + `ipt>`).join('\n'));
+        })();
+    </script>
+</body>
+</html>

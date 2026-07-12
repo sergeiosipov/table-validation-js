@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Table Validation — Authoring &amp; Run Console</title>
+    <style>
+        :root { --bg:#111417; --panel:#1a1f24; --line:#2c343b; --fg:#d7dde3; --dim:#8a949e;
+                --acc:#4ea1ff; --ok:#7be08a; --warn:#e8c264; --err:#f08080; }
+        * { box-sizing: border-box; }
+        body { font: 13px/1.45 ui-monospace, Consolas, monospace; margin: 0; background: var(--bg); color: var(--fg); }
+        #app { max-width: 1280px; margin: 0 auto; padding: .6rem 1rem 3rem; }
+        header { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .5rem 0; border-bottom: 1px solid var(--line); }
+        .brand { font-weight: bold; margin-right: .6rem; } .brand small { color: var(--dim); font-weight: normal; }
+        nav { display: flex; gap: .4rem; padding: .5rem 0; border-bottom: 1px solid var(--line); margin-bottom: .8rem; flex-wrap: wrap; }
+        button { background: #232a31; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: .25rem .6rem; cursor: pointer; font: inherit; }
+        button:hover:not(:disabled) { border-color: var(--acc); }
+        button:disabled { opacity: .45; cursor: not-allowed; }
+        button.primary { background: #17324d; border-color: #2b5c8f; }
+        button.danger { color: var(--err); }
+        button.mini { padding: 0 .35rem; font-size: 11px; }
+        button.big { font-size: 15px; padding: .4rem 1rem; }
+        .tab { border-radius: 4px 4px 0 0; }
+        .tab.active { background: var(--panel); border-color: var(--acc); }
+        select, input[type=text] { background: #14181c; color: var(--fg); border: 1px solid var(--line); border-radius: 3px; padding: .2rem .35rem; font: inherit; max-width: 100%; }
+        input.narrow { width: 7rem; } input.json { width: 22rem; max-width: 100%; }
+        section { display: block; }
+        .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: .7rem .9rem; margin-bottom: .8rem; }
+        .card-title { font-weight: bold; margin-bottom: .5rem; }
+        .hint { color: var(--dim); font-size: 12px; margin: .2rem 0; } .hint.big { font-size: 13px; padding: .4rem 0; }
+        .notice { border: 1px solid var(--line); border-left: 4px solid var(--dim); border-radius: 4px; padding: .35rem .6rem; margin: .4rem 0; }
+        .notice.info { border-left-color: var(--acc); } .notice.warn { border-left-color: var(--warn); } .notice.error { border-left-color: var(--err); }
+        .fields { display: flex; flex-direction: column; gap: .35rem; margin: .4rem 0; }
+        .field { display: grid; grid-template-columns: 240px 1fr; gap: .6rem; align-items: baseline; }
+        .field > label { color: var(--fg); } .field .req { color: var(--err); }
+        .field.irrelevant { opacity: .5; }
+        .field-err { color: var(--err); margin-left: .4rem; font-size: 11px; }
+        label.inline { display: inline-flex; align-items: center; gap: .25rem; margin-right: .8rem; white-space: nowrap; }
+        .sms, .range { display: inline-flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+        .schema-layout { display: grid; grid-template-columns: 260px 1fr; gap: .8rem; align-items: start; }
+        .master { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: .6rem; position: sticky; top: .5rem; }
+        .master h4 { margin: .4rem 0 .3rem; color: var(--dim); }
+        .master-item { display: flex; justify-content: space-between; padding: .15rem .3rem; border-radius: 3px; }
+        .master-item.active { background: #24303c; }
+        .master-item a { color: var(--fg); text-decoration: none; } .master-item small { color: var(--dim); }
+        .grid { border-collapse: collapse; margin: .4rem 0; max-width: 100%; }
+        .grid th, .grid td { border: 1px solid var(--line); padding: .15rem .45rem; text-align: left; vertical-align: top; }
+        .grid th { background: #20262c; position: sticky; top: 0; }
+        .gridwrap { overflow: auto; max-height: 65vh; border: 1px solid var(--line); }
+        .sev-error { color: var(--err); font-weight: bold; } .sev-warning { color: var(--warn); font-weight: bold; }
+        .tint-error { background: #47191f; } .tint-warning { background: #4a3c12; }
+        .tint-interpreted { background: #14324a; } .tint-null { background: #24262a; color: var(--dim); }
+        .tint-skipped { background: repeating-linear-gradient(45deg, #1a1f24, #1a1f24 4px, #22272c 4px, #22272c 8px); }
+        .verdict { font-size: 15px; font-weight: bold; padding: .5rem .7rem; border-radius: 5px; margin: .4rem 0; background: #20262c; }
+        .verdict-pass { color: var(--ok); } .verdict-passWithWarnings { color: var(--warn); }
+        .verdict-fail, .verdict-aborted { color: var(--err); }
+        .kpis { display: flex; gap: 1rem; margin: .4rem 0; flex-wrap: wrap; }
+        .kpi b { font-size: 15px; }
+        .subtabs { display: flex; gap: .3rem; margin: .4rem 0; flex-wrap: wrap; }
+        .filterbar { display: flex; gap: .6rem; margin: .4rem 0; flex-wrap: wrap; }
+        .exportbar { display: flex; gap: .5rem; align-items: center; margin: .3rem 0; flex-wrap: wrap; color: var(--dim); }
+        .runrow { display: flex; gap: 1.2rem; align-items: flex-start; margin: .6rem 0; flex-wrap: wrap; }
+        .offer { border-top: 1px dashed var(--line); margin-top: .5rem; padding-top: .5rem; }
+        .conf-high { color: var(--ok); } .conf-ambiguous { color: var(--warn); } .conf-fallback { color: var(--dim); }
+        .auth-err { color: var(--err); } .auth-adv { color: var(--warn); } .auth-def { color: var(--dim); }
+        .check-entry { border: 1px dashed var(--line); border-radius: 4px; padding: .3rem .5rem; margin: .3rem 0; }
+        .ordbtns { white-space: nowrap; }
+        .stale { color: var(--warn); }
+        .ingest-form { display: flex; flex-wrap: wrap; gap: .6rem; align-items: baseline; border-top: 1px dashed var(--line); margin-top: .4rem; padding-top: .4rem; }
+        .prov { color: var(--ok); margin: .3rem 0; }
+        pre { white-space: pre-wrap; color: var(--dim); font-size: 11px; }
+        details > summary { cursor: pointer; color: var(--dim); }
+        .inline-opts { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; margin: .3rem 0; }
+        :focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+        .clickable { cursor: pointer; } .clickable:hover { filter: brightness(1.25); }
+        tr.clickable:hover td { background: #232a31; }
+        .flash { outline: 2px solid var(--acc); }
+        .legend { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; margin: .3rem 0; color: var(--dim); }
+        .legend-chip { display: inline-flex; align-items: center; gap: .3rem; }
+        .swatch { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--line); border-radius: 2px; }
+        pre.preview { max-height: 60vh; overflow: auto; background: #14181c; padding: .5rem; border: 1px solid var(--line); border-radius: 4px; color: var(--fg); }
+        .dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
+        .dialog { background: #191e23; border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.2rem; min-width: 22rem; max-width: 34rem; }
+        .dialog h3 { margin: 0 0 .4rem; font-size: 1rem; }
+        .dialog input { width: 100%; margin: .4rem 0; }
+        .dialog-btns { display: flex; gap: .6rem; justify-content: flex-end; margin-top: .8rem; }
+        textarea.fnsrc { width: 100%; background: #14181c; color: var(--fg); border: 1px solid var(--line); border-radius: 3px; font: inherit; padding: .3rem .4rem; margin-top: .3rem; }
+        .hdr-gap { flex: 1; }
+        tr.delta-new td { background: #33171b; }
+        tr.delta-resolved td { background: #14301c; }
+        details.byrule { margin: .4rem 0; }
+    </style>
+</head>
+<body>
+    <div id="app">loading…</div>
+
+    <!-- Dependencies per JS profile §2: read from globalThis at call time only.
+         Luxon: temporal columns + temporal inference. ExcelJS: XLSX ingest + the exporters. -->
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js"></script>
+    <script>
+        // engine + console scripts, cache-busted like the test harness
+        (function () {
+            const v = '?cb=' + Date.now();
+            const files = ['dist/table-validation.js',
+                'console/ui.js', 'console/store.js', 'console/panels.js', 'console/results.js', 'console/app.js'];
+            document.write(files.map((f) => `<scr` + `ipt src="${f}${v}"></scr` + `ipt>`).join('\n'));
+        })();
+    </script>
+</body>
+</html>
