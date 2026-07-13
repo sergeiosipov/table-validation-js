@@ -469,4 +469,144 @@
         },
     });
 
+
+    // ---------------- v1.3.0: yy candidates, negatives, data-loss guard, honesty ----------------
+
+    U.push({
+        suite, name: 'yy candidates (1.3.0): two-digit-year columns infer with ambiguous/twoDigitYear, draft self-validates',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            const t = { headers: ['d'], rows: [['30/06/19'], ['01/12/20']] };
+            const { draft, report } = TV().inferConfig(t);
+            const c = report.columns[0];
+            assertEq(c.inferredType, 'date', 'two-digit-year column infers date');
+            assertEq(draft.columns.d.type.formats, ['dd/MM/yy'], 'dd/MM/yy drafted');
+            assertEq(c.confidence, 'ambiguous', 'EVERY yy winner is ambiguous');
+            assert(c.reasons.includes('twoDigitYear'), 'reason twoDigitYear present');
+            assert(draft.evaluation.twoDigitYearPivot === undefined, 'drafts never emit the pivot (N4)');
+            assertN1(assert, draft, 'yy');
+            assert(TV().validate(draft, t).valid, 'draft validates its own sample');
+            // family machinery covers yy families for free
+            const fam = TV().inferConfig({ headers: ['d'], rows: [['1/01/19'], ['22/12/19']] });
+            assertEq(fam.draft.columns.d.type.formats, ['d/MM/yy'], 'mixed padding reduces within the yy family');
+            // 4-digit years never reach yy candidates (exactly-two-digit pin)
+            const iso = TV().inferConfig({ headers: ['d'], rows: [['30/06/2019'], ['01/12/2020']] });
+            assertEq(iso.draft.columns.d.type.formats, ['dd/MM/yyyy'], 'yyyy column keeps its 1.2.x winner');
+            assertEq(iso.report.columns[0].confidence, 'high', 'no yy ambiguity leaks onto yyyy columns');
+        },
+    });
+
+    U.push({
+        suite, name: 'negativeStyle candidates (1.3.0): accounting and SAP columns infer; positives-only unchanged',
+        fn: ({ assert, assertEq }) => {
+            const acc = TV().inferConfig({ headers: ['a'], rows: [['(1,234.50)'], ['12.00']] });
+            assertEq(acc.report.columns[0].inferredType, 'float', 'accounting column infers float');
+            assertEq(acc.draft.columns.a.type.formats,
+                [{ decimalSeparator: '.', groupingSeparators: [','], negativeStyle: 'parentheses' }],
+                'parentheses format drafted');
+            assertEq(acc.report.columns[0].observed.min, -1234.5, 'interpreted minimum is negative');
+            assert(TV().validate(acc.draft, { headers: ['a'], rows: [['(1,234.50)'], ['12.00']] }).valid, 'self-validates');
+            const sap = TV().inferConfig({ headers: ['a'], rows: [['1234.50-'], ['12.00']] });
+            assertEq(sap.draft.columns.a.type.formats,
+                [{ decimalSeparator: '.', groupingSeparators: [','], negativeStyle: 'trailingMinus' }],
+                'trailing-minus format drafted');
+            // positives-only columns keep the bare 1.2.x winner (no negativeStyle key)
+            const pos = TV().inferConfig({ headers: ['a'], rows: [['1,234.50'], ['12.00']] });
+            assertEq(pos.draft.columns.a.type.formats, [{ decimalSeparator: '.', groupingSeparators: [','] }],
+                'strict candidate 1 still wins for ordinary data');
+            // mixed decoration styles fall through to string, labeled numericLike
+            const mixed = TV().inferConfig({ headers: ['a'], rows: [['-12.00'], ['(3.50)']] });
+            assertEq(mixed.report.columns[0].inferredType, 'string', 'mixed sign notations stay conservative');
+            assertEq(mixed.report.columns[0].confidence, 'fallback', 'honesty label');
+            assertEq(mixed.report.columns[0].reasons, ['numericLike'], 'numericLike reason');
+        },
+    });
+
+    U.push({
+        suite, name: 'data-loss guard (1.3.0): leading zeros and unsafe magnitudes infer string with a numeric alternative',
+        fn: ({ assert, assertEq }) => {
+            const lz = TV().inferConfig({ headers: ['id'], rows: [['007'], ['042']] });
+            assertEq(lz.report.columns[0].inferredType, 'string', 'zeros are data');
+            assertEq(lz.report.columns[0].confidence, 'ambiguous', 'ambiguous, not silent');
+            assertEq(lz.report.columns[0].reasons, ['leadingZeroInt'], 'reason');
+            assertEq(lz.report.columns[0].alternatives, [{ type: 'int', formats: null, rank: 1 }], 'int alternative');
+            assert(TV().validate(lz.draft, { headers: ['id'], rows: [['007'], ['042']] }).valid, 'self-validates');
+            const dc = TV().inferConfig({ headers: ['id'], rows: [['1'], ['01']] });
+            assertEq(dc.report.columns[0].observed.distinctCount, 2, '"1" and "01" stay distinct as strings');
+            const un = TV().inferConfig({ headers: ['n'], rows: [['9007199254740993'], ['9007199254740995']] });
+            assertEq(un.report.columns[0].inferredType, 'string', 'unsafe magnitudes are not silently lossy');
+            assertEq(un.report.columns[0].reasons, ['unsafeInt'], 'reason');
+            assertEq(un.report.columns[0].alternatives, [{ type: 'float', formats: null, rank: 1 }],
+                'the lossy reading is the alternative (int would reject unsafe values)');
+        },
+    });
+
+    U.push({
+        suite, name: 'groupingAmbiguity (1.3.0): "1.234"-shaped columns flag both readings; any breaker disambiguates',
+        fn: ({ assert, assertEq }) => {
+            const dot = TV().inferConfig({ headers: ['n'], rows: [['1.234'], ['2.345']] });
+            assertEq(dot.report.columns[0].inferredType, 'float', 'decimal reading wins (ladder unchanged)');
+            assertEq(dot.report.columns[0].confidence, 'ambiguous', 'flagged');
+            assertEq(dot.report.columns[0].reasons, ['groupingAmbiguity'], 'reason');
+            assertEq(dot.report.columns[0].alternatives[0].type, 'int', 'grouped-integer alternative');
+            const comma = TV().inferConfig({ headers: ['n'], rows: [['1,234'], ['2,345']] });
+            assertEq(comma.report.columns[0].inferredType, 'int', 'grouped-int reading wins for commas');
+            assert(comma.report.columns[0].reasons.includes('groupingAmbiguity'), 'flagged');
+            assertEq(comma.report.columns[0].alternatives[0].type, 'float', 'decimal-comma alternative');
+            const clear = TV().inferConfig({ headers: ['n'], rows: [['1.234'], ['12.5']] });
+            assertEq(clear.report.columns[0].confidence, 'high', 'a breaking shape disambiguates silently');
+        },
+    });
+
+    U.push({
+        suite, name: 'null tokens (1.3.0): #N/A, None, -- adopt and union in candidate order',
+        fn: ({ assert, assertEq }) => {
+            const { draft, report } = TV().inferConfig({
+                headers: ['a'], rows: [['#N/A'], ['None'], ['--'], ['x'], ['n/a']],
+            });
+            assertEq(draft.nullHandling.nullEquivalents, ['', '#N/A', 'n/a', 'None', '--'],
+                'adopted tokens in fixed candidate order after ""');
+            assertEq(report.columns[0].observed.nulls, 4, 'all four tokens effectively null');
+            assert(TV().validate(draft, { headers: ['a'], rows: [['#N/A'], ['x']] }).valid, 'draft accepts the tokens');
+        },
+    });
+
+    U.push({
+        suite, name: 'minute + microsecond datetimes (1.3.0): new ISO candidates infer',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            const m = TV().inferConfig({ headers: ['t'], rows: [['2026-07-15 14:30'], ['2026-07-15 15:00']] });
+            assertEq(m.report.columns[0].inferredType, 'datetime', 'minute precision infers datetime');
+            assertEq(m.draft.columns.t.type.formats, ['yyyy-MM-dd HH:mm'], 'minute format drafted');
+            assert(TV().validate(m.draft, { headers: ['t'], rows: [['2026-07-15 14:30']] }).valid, 'self-validates');
+            const u = TV().inferConfig({ headers: ['t'], rows: [['2026-07-15 14:30:45.123456'], ['2026-07-16 09:00:00.000001']] });
+            assertEq(u.draft.columns.t.type.formats, ['yyyy-MM-dd HH:mm:ss.SSSSSS'], 'DB timestamps infer SSSSSS');
+        },
+    });
+
+    U.push({
+        suite, name: 'categorical at the floor (1.3.0): a 3-value column qualifies at 20 rows (ratio 0.2)',
+        fn: ({ assertEq }) => {
+            const rows20 = rows(20, (i) => [['A', 'B', 'C'][i % 3]]);
+            const r = TV().inferConfig({ headers: ['c'], rows: rows20 });
+            assertEq(r.report.columns[0].inferredType, 'categorical', '20 rows suffice now');
+            assertEq(r.draft.columns.c.type.allowedValues, ['A', 'B', 'C'], 'values sorted');
+        },
+    });
+
+    U.push({
+        suite, name: 'confidence honesty (1.3.0): structured-looking failures report fallback, plain text stays high',
+        needsLuxon: true,
+        fn: ({ assertEq }) => {
+            const times = TV().inferConfig({ headers: ['t'], rows: [['9:05'], ['14:30']] });
+            assertEq(times.report.columns[0].inferredType, 'string', 'unpadded times are not a candidate');
+            assertEq(times.report.columns[0].confidence, 'fallback', 'honest label');
+            assertEq(times.report.columns[0].reasons, ['temporalLike'], 'temporalLike');
+            const months = TV().inferConfig({ headers: ['d'], rows: [['15-Jul-2026'], ['16-Aug-2026']] });
+            assertEq(months.report.columns[0].reasons, ['temporalLike'], 'month names look temporal');
+            const text = TV().inferConfig({ headers: ['s'], rows: [['hello world'], ['plain text']] });
+            assertEq(text.report.columns[0].confidence, 'high', 'straightforwardly textual stays high');
+        },
+    });
+
 })();

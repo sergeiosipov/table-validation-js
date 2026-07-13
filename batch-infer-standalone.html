@@ -6,7 +6,7 @@
     <title>Table Validation — Batch Config Inference</title>
     <!-- STANDALONE TOOL: infer a draft config for MANY files at once and save them
          all as one ZIP. Single hand-authored file — send it anywhere; the engine and
-         libraries load from CDN (the engine pinned to the immutable v1.2.1 tag with
+         libraries load from CDN (the engine pinned to the immutable v1.3.0 tag with
          subresource integrity). Files are read locally in the browser and never leave
          the machine; the only network access is cdn.jsdelivr.net.
 
@@ -108,8 +108,8 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"
         integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
         crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.2.1/dist/table-validation.js"
-        integrity="sha384-kclAuCvHWp7qgfWLEAo9fw/XL6L0+kjQy0tvwlD0sE/WSAWlZsP95M0gvq65Grj/"
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.0/dist/table-validation.js"
+        integrity="sha384-YuYEveCuOUtUbIbJ37sXFaDt5CW0HkDWo4rQ8oVhFogxWFo/SJsuky86/5UhIsx2"
         crossorigin="anonymous"></script>
 <script>
 'use strict';
@@ -273,6 +273,9 @@
             if (x.decimalSeparator != null) parts.push('decimal "' + x.decimalSeparator + '"');
             if ((x.groupingSeparators || []).length) parts.push('grouping "' + x.groupingSeparators.join('') + '"');
             if (x.allowBareDecimal) parts.push('bare decimals (.85)');
+            if (x.negativeStyle === 'parentheses') parts.push('( ) negatives');           // §3.5 (1.3.0)
+            if (x.negativeStyle === 'trailingMinus') parts.push('trailing − negatives');  // §3.5 (1.3.0)
+            if (x.pattern) parts.push('pattern "' + x.pattern + '"');                     // §3.5 (1.3.0)
             return parts.join(' · ') || JSON.stringify(x);
         }).join(', ');
     }
@@ -308,8 +311,6 @@
             const headerRow = ws.addRow(['#', ...cols.map((c) => c.name)]);
 
             // styling: labels + headers bold; the type row tinted by confidence
-            ws.getColumn(1).width = 16;
-            for (let i = 0; i < cols.length; i++) ws.getColumn(i + 2).width = 14;
             for (let r = 1; r <= meta.length + 1; r++) ws.getRow(r).getCell(1).font = { bold: true };
             ws.getRow(2).font = { bold: true };
             headerRow.font = { bold: true };
@@ -319,11 +320,42 @@
             });
             ws.views = [{ state: 'frozen', xSplit: 1, ySplit: meta.length + 3 }];
 
+            // review dropdowns (1.3.0): the inferred-type and nullable metadata rows are
+            // editable choices — a reviewer adjusts them in Excel without hand-typing
+            const rowOf = (label) => 1 + meta.findIndex(([l]) => l === label) + 1;
+            const listValidation = (values) => ({
+                type: 'list', allowBlank: false, showErrorMessage: true,
+                formulae: ['"' + values.join(',') + '"'],
+            });
+            const typeRowN = rowOf('inferred type');
+            const nullableRowN = rowOf('nullable');
+            cols.forEach((c, i) => {
+                ws.getRow(typeRowN).getCell(i + 2).dataValidation =
+                    listValidation(['string', 'int', 'float', 'bool', 'datetime', 'date', 'time', 'categorical', 'skip']);
+                ws.getRow(nullableRowN).getCell(i + 2).dataValidation = listValidation(['true', 'false']);
+            });
+
             // the full ingested data, null cells left empty
             for (let ri = 0; ri < e.tableData.rows.length; ri++) {
                 const row = e.tableData.rows[ri];
                 ws.addRow([ri + 1, ...cols.map((_, ci) => (row[ci] === null || row[ci] === undefined ? null : row[ci]))]);
             }
+
+            // autofilter on the data header row (1.3.0)
+            ws.autoFilter = {
+                from: { row: headerRow.number, column: 1 },
+                to: { row: headerRow.number, column: cols.length + 1 },
+            };
+
+            // auto-width (1.3.0): fit each column to its longest content — metadata rows,
+            // header, and data — clamped to a sane band
+            const measure = (v) => (v === null || v === undefined ? 0 : String(v).length);
+            ws.getColumn(1).width = Math.min(Math.max(Math.max(...meta.map(([l]) => l.length), 4) + 2, 8), 24);
+            cols.forEach((c, i) => {
+                let w = Math.max(measure(c.name), ...meta.map(([, values]) => measure(values[i])));
+                for (const row of e.tableData.rows) w = Math.max(w, measure(row[i]));
+                ws.getColumn(i + 2).width = Math.min(Math.max(w + 2, 8), 48);
+            });
         }
         const buf = await wb.xlsx.writeBuffer();
         download('inferred-workbook.xlsx', new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));

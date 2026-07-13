@@ -55,7 +55,7 @@ A task-oriented guide to the console for analysts and data stewards. No programm
 required: everything in this guide happens in the browser, with the mouse and a few
 JSON snippets you can copy verbatim.
 
-*This guide covers console and library version 1.2.1. Screenshots are generated from the
+*This guide covers console and library version 1.3.0. Screenshots are generated from the
 committed example files by [`make-screenshots.py`](make-screenshots.py) — if the console
 changes, rerun that script and the images regenerate exactly.*
 
@@ -629,13 +629,20 @@ The mess → what to do in the console:
 | Cent-level rounding differences | *tolerance* on the numeric column (inference suggests one) | [7](#7-comparing-two-tables), [9](#9-power-features) |
 | Amounts must keep exactly N decimals | *suggest precision* (on by default) drafts the observed bounds | [9](#9-power-features) |
 | Decimals without a leading zero (`.85`) | inference drafts a NumberFormat with `allowBareDecimal` — validation reads `.85` as `0.85` | [9](#9-power-features) |
+| Accounting negatives (`(1,234.50)`) or SAP trailing minus (`1234.50-`) | inference drafts a NumberFormat with `negativeStyle` — validation reads both as `-1234.50`; a column mixing `-x` and `(x)` takes two formats in the array | [9](#9-power-features) |
+| A spelling contract ("always exactly `0.0000`") | add `pattern` to the NumberFormat (digit counts + grouping positions, hard constraint — suppresses the plain-parse fallback), or type an example into the schema editor's **from example** box and accept the compiled format | [9](#9-power-features) |
+| Two-digit years (`30/06/19`) | inference drafts `dd/MM/yy`-style formats, always flagged **ambiguous** — the century is a guess (years map into `[pivot, pivot+99]`, default pivot 1961). Wrong century? Set `evaluation.twoDigitYearPivot` (e.g. 1900 for birthdates), per column if needed | [9](#9-power-features) |
+| Database timestamps (`…14:30:45.123456`) | `SSSSSS` accepts six-digit fractions (instants carry millisecond resolution) | [9](#9-power-features) |
+| `#N/A`, `n/a`, `None`, `--` scattered in cells | recognized null-token candidates since 1.3.0 — adopted into `nullEquivalents` when observed | [9](#9-power-features) |
+| Zero-padded ids (`007`) or 17-digit numbers | inferred as **string** with the numeric reading as a ranked alternative — converting would destroy zeros or precision; adopt the alternative only if that loss is intended | [9](#9-power-features) |
+| Every value looks like `1.234` | the winner is flagged ambiguous with the other reading (decimal vs thousands) as an alternative — check the report before trusting either | [9](#9-power-features) |
 | "What did my change do?" | re-run and read the **Δ Delta** view | [8](#8-iterating) |
 | "Why is this button disabled?" | hover it — every disabled control in the console carries its reason | [2](#2-getting-started), [4](#4-reading-results) |
 
 Deeper reading: the [README](../README.md) (library overview and the messy-data
-cookbook) and the [console architecture](../table-validation-ui-architecture-v1.2.1.md)
+cookbook) and the [console architecture](../table-validation-ui-architecture-v1.3.0.md)
 (§11 maps every library capability to its place in the UI) live in this repository; the
-[core specification](https://github.com/sergeiosipov/table-validation-spec/blob/v1.2.1/table-validation-core-spec-v1.2.1.md)
+[core specification](https://github.com/sergeiosipov/table-validation-spec/blob/v1.3.0/table-validation-core-spec-v1.3.0.md)
 (the exact meaning of every check and verdict) lives in the companion
 `table-validation-spec` repository.
 </script>

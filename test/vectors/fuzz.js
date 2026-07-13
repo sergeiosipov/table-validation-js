@@ -130,7 +130,9 @@
         suite, name: 'inference: random tables always yield Phase-1-valid, self-accepting, deterministic drafts',
         fn: ({ assert }) => {
             const CELLS = ['x', '1', '2.5', '1,5', 'true', 'no', 'NA', '', null, 7, 2.25, true, false,
-                'AB-1', '2026-07-01', '01.07.2026', '12:30', '👍', '  pad ', '-', 'NULL', '1e5', '0', NaN];
+                'AB-1', '2026-07-01', '01.07.2026', '12:30', '👍', '  pad ', '-', 'NULL', '1e5', '0', NaN,
+                '30/06/19', '(1,234.50)', '1234.50-', '007', '#N/A', 'None', '--', '1.234', '9:05',
+                '9007199254740993', '2026-07-15 14:30'];
             for (let seed = 1; seed <= 25; seed++) {
                 const rnd = prng(seed * 65537);
                 const cols = 1 + Math.floor(rnd() * 6);

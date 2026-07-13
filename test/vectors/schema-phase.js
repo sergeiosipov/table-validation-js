@@ -185,4 +185,58 @@
             ],
         },
     });
+
+    // ---------------- v1.3.0: rules 12 (negativeStyle/pattern) + 58 (twoDigitYearPivot) ----------------
+
+    V({
+        name: 'rule 12 (1.3.0): unknown negativeStyle halts',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' },
+            columns: { a: { type: { name: 'float', formats: [{ decimalSeparator: '.', groupingSeparators: [], negativeStyle: 'suffix' }] } } },
+        },
+        table: { headers: ['a'], rows: [] },
+        expect: { valid: false, aborted: true, abortReason: 'schemaInvalid' },
+    });
+
+    V({
+        name: 'rule 12 (1.3.0): parentheses style forbids "(" among separators',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' },
+            columns: { a: { type: { name: 'float', formats: [{ decimalSeparator: '.', groupingSeparators: ['('], negativeStyle: 'parentheses' }] } } },
+        },
+        table: { headers: ['a'], rows: [] },
+        expect: { valid: false, aborted: true, abortReason: 'schemaInvalid' },
+    });
+
+    V({
+        name: 'rule 12 (1.3.0): pattern with undeclared characters halts',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' },
+            columns: { a: { type: { name: 'float', formats: [{ decimalSeparator: '.', groupingSeparators: [], pattern: '#,##0.00' }] } } },
+        },
+        table: { headers: ['a'], rows: [] },
+        expect: { valid: false, aborted: true, abortReason: 'schemaInvalid' },   // "," not declared
+    });
+
+    V({
+        name: 'rule 12 (1.3.0): structurally invalid pattern (unequal grouping segments) halts',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' },
+            columns: { a: { type: { name: 'float', formats: [{ decimalSeparator: '.', groupingSeparators: [','], pattern: '#,##00,0.0' }] } } },
+        },
+        table: { headers: ['a'], rows: [] },
+        expect: { valid: false, aborted: true, abortReason: 'schemaInvalid' },
+    });
+
+    V({
+        name: 'rule 58 (1.3.0): twoDigitYearPivot out of range halts (table and column levels)',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' },
+            evaluation: { strictType: true, timezone: 'utc', twoDigitYearPivot: 999 },
+            columns: { d: { type: { name: 'date', formats: ['dd/MM/yy'] } } },
+        },
+        table: { headers: ['d'], rows: [] },
+        expect: { valid: false, aborted: true, abortReason: 'schemaInvalid' },
+    });
+
 })();

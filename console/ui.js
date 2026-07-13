@@ -155,6 +155,11 @@
             control = smsControl(cur, desc, commit);
         } else if (t === 'Range' || t === 'Range|null') {
             control = rangeControl(cur, desc, commit);
+        } else if (t === 'NumberFormat[]|null') {
+            // JSON chip editor + example-to-format compiler: type an example value, see
+            // the compiled parametric format(s), append explicitly — never silently
+            control = h('span', {}, jsonControl(cur, desc, commit),
+                exampleCompiler(() => ctx.get(path), commit));
         } else {
             // arrays, maps, spec objects, Severity object form → JSON input (unambiguous)
             control = jsonControl(cur, desc, commit);
@@ -175,6 +180,94 @@
     NS.field = field;
 
     const isObjectValue = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+    // ---------------- example → NumberFormat compiler (UI sugar; schema stays parametric) ----------------
+    // Deterministic reading of one example value. Returns { formats: [...], note } —
+    // TWO formats when the example is genuinely ambiguous ("1.234": decimal vs grouped
+    // integer) so the user picks; the compiled JSON is always shown before committing.
+    function compileNumberExample(raw) {
+        let s = String(raw).trim();
+        if (!s) return { error: 'type an example value first' };
+        let negativeStyle = null;
+        if (/^\(.*\)$/.test(s)) { negativeStyle = 'parentheses'; s = s.slice(1, -1); }
+        else if (s.length > 1 && s.endsWith('-')) { negativeStyle = 'trailingMinus'; s = s.slice(0, -1); }
+        else if (/^[+-]/.test(s)) s = s.slice(1);
+        const seps = Array.from(new Set(s.replace(/[0-9]/g, '').split('')));
+        if (seps.some((c) => /[+\-0-9]/.test(c))) return { error: 'signs may only lead (or trail as a minus)' };
+        if (seps.length > 2) return { error: `too many separator characters (${seps.join(' ')})` };
+        const mk = (ds, gs, extra) => {
+            const f = { decimalSeparator: ds, groupingSeparators: gs };
+            if (extra) Object.assign(f, extra);
+            if (negativeStyle) f.negativeStyle = negativeStyle;
+            return f;
+        };
+        const groupsOk = (str, g) => {
+            const parts = str.split(g);
+            return parts.length >= 2 && parts.every((p) => /^[0-9]+$/.test(p)) &&
+                parts[0].length >= 1 && parts[0].length <= 3 &&
+                parts.slice(1).every((p) => p.length === 3);
+        };
+        if (seps.length === 0) {
+            if (!/^[0-9]+$/.test(s)) return { error: 'unreadable example' };
+            return { formats: [mk('.', [])], note: 'plain integer example — dot decimal assumed' };
+        }
+        if (seps.length === 2) {
+            // the separator whose LAST occurrence comes later is the decimal; it must occur once
+            const [a, b] = seps;
+            const dsChar = s.lastIndexOf(a) > s.lastIndexOf(b) ? a : b;
+            const gsChar = dsChar === a ? b : a;
+            if (s.split(dsChar).length !== 2) return { error: `"${dsChar}" occurs more than once — cannot be the decimal separator` };
+            const intPart = s.slice(0, s.lastIndexOf(dsChar));
+            if (!groupsOk(intPart, gsChar)) return { error: `"${gsChar}" does not group digits in threes` };
+            return { formats: [mk(dsChar, [gsChar])] };
+        }
+        const c = seps[0];
+        const n = s.split(c).length - 1;
+        if (n > 1) {
+            if (!groupsOk(s, c)) return { error: `"${c}" repeats but does not group digits in threes` };
+            return { formats: [mk(null, [c])], note: 'grouping-only (integer) reading' };
+        }
+        const tail = s.slice(s.indexOf(c) + 1);
+        const head = s.slice(0, s.indexOf(c));
+        if (head === '') {
+            return { formats: [mk(c, [], { allowBareDecimal: true })], note: 'bare decimal — allowBareDecimal set' };
+        }
+        if (tail.length === 3 && head.length >= 1 && head.length <= 3) {
+            // the classic ambiguity: decimal vs thousands — offer BOTH, user picks
+            return {
+                formats: [mk(c, []), mk(c === '.' ? ',' : '.', [c])],
+                ambiguous: true,
+                note: `"${s}" reads as a decimal OR a grouped integer — pick the intended one`,
+            };
+        }
+        return { formats: [mk(c, [])] };
+    }
+    NS.compileNumberExample = compileNumberExample;
+
+    function exampleCompiler(getCur, commit) {
+        const input = h('input', { type: 'text', class: 'narrow', placeholder: 'e.g. (1 234,50)' });
+        const out = h('span', { class: 'hint' });
+        const render = () => {
+            const r = compileNumberExample(input.value);
+            out.textContent = '';
+            if (r.error) { out.textContent = r.error; return; }
+            if (r.note) out.append(r.note + ' ');
+            for (const f of r.formats) {
+                const label = JSON.stringify(f);
+                out.append(h('button', {
+                    class: 'mini', title: 'append this format to the formats array',
+                    onclick: () => {
+                        const cur = getCur();
+                        commit((Array.isArray(cur) ? cur : []).concat([f]));
+                        input.value = '';
+                        out.textContent = 'added ' + label;
+                    },
+                }, '+ ' + label));
+            }
+        };
+        input.addEventListener('input', render);
+        return h('span', { class: 'fmt-example' }, ' from example: ', input, ' ', out);
+    }
 
     function smsControl(cur, desc, commit) {
         const val = isObjectValue(cur) ? cur : null;

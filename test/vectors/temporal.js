@@ -142,4 +142,98 @@
             cellRegister: [{ row: 0, ruleName: 'rangeBreach', value: '2026-07-08T10:00+02:00' }],
         },
     });
+
+    // ---------------- v1.3.0: yy exact-2-digit pin + pivot century mapping + SSSSSS ----------------
+
+    V({
+        name: 'yy (1.3.0): exactly two digits — 4-digit years REJECT under dd/MM/yy (Luxon lenience guarded)',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' }, resultConfig: RC,
+            columns: { d: { type: { name: 'date', formats: ['dd/MM/yy'] } } },
+        },
+        table: { headers: ['d'], rows: [['30/06/19'], ['30/06/2019']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 1, ruleName: 'typeMismatch' }],
+        },
+    });
+
+    V({
+        name: 'yy (1.3.0): default pivot 1961 maps 19→2019, 61→1961; range check sees the mapped years',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' }, resultConfig: RC,
+            columns: {
+                d: {
+                    type: {
+                        name: 'date', formats: ['dd/MM/yy'],
+                        value: { min: '2000-01-01', max: '2060-12-31', minInclusive: true, maxInclusive: true },
+                    },
+                },
+            },
+        },
+        table: { headers: ['d'], rows: [['30/06/19'], ['30/06/61']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 1, ruleName: 'rangeBreach' }],   // 61 → 1961, below min
+        },
+    });
+
+    V({
+        name: 'yy (1.3.0): evaluation.twoDigitYearPivot 1900 maps 19→1919 (vintage feeds expressible)',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' }, resultConfig: RC,
+            evaluation: { strictType: true, timezone: 'utc', twoDigitYearPivot: 1900 },
+            columns: {
+                d: {
+                    type: {
+                        name: 'date', formats: ['dd/MM/yy'],
+                        value: { min: '1900-01-01', max: '1999-12-31', minInclusive: true, maxInclusive: true },
+                    },
+                },
+            },
+        },
+        table: { headers: ['d'], rows: [['30/06/19'], ['30/06/99']] },
+        expect: { valid: true, summary: { bySeverity: { error: 0, warning: 0 } } },
+    });
+
+    V({
+        name: 'yy (1.3.0): column-level pivot override beats the table level (§3.4)',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' }, resultConfig: RC,
+            columns: {
+                birth: {
+                    evaluation: { twoDigitYearPivot: 1900 },
+                    type: {
+                        name: 'date', formats: ['dd/MM/yy'],
+                        value: { min: '1900-01-01', max: '1999-12-31', minInclusive: true, maxInclusive: true },
+                    },
+                },
+                expiry: {
+                    type: {
+                        name: 'date', formats: ['dd/MM/yy'],
+                        value: { min: '2000-01-01', max: '2060-12-31', minInclusive: true, maxInclusive: true },
+                    },
+                },
+            },
+        },
+        table: { headers: ['birth', 'expiry'], rows: [['30/06/34', '30/06/34']] },   // 1934 vs 2034
+        expect: { valid: true, summary: { bySeverity: { error: 0, warning: 0 } } },
+    });
+
+    V({
+        name: 'SSSSSS (1.3.0): six-digit DB timestamps parse; five digits reject',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' }, resultConfig: RC,
+            columns: { ts: { type: { name: 'datetime', formats: ['yyyy-MM-dd HH:mm:ss.SSSSSS'] } } },
+        },
+        table: { headers: ['ts'], rows: [['2026-07-15 14:30:45.123456'], ['2026-07-15 14:30:45.12345']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 1, ruleName: 'typeMismatch' }],
+        },
+    });
+
 })();

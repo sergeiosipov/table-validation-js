@@ -591,6 +591,13 @@
                 if (!st.inference.offer) return;
                 loadBuilder(st, st.inference.offer.draft, null);
                 st.inference.status = 'idle';
+                // dotted/bracketed inferred names (e.g. a "price.eur" header) validate fine
+                // but cannot be addressed by the per-column dotted-path editor — say so now
+                const awkward = Object.keys(st.inference.offer.draft.columns || {}).filter((n) => /[.[\]]/.test(n));
+                if (awkward.length) {
+                    notice('warning', 'Column name(s) ' + awkward.map((n) => JSON.stringify(n)).join(', ') +
+                        ' contain "." or brackets — validation works, but the per-column editor cannot address such names. Rename the source header (or the column on the Schema tab) to edit them.');
+                }
                 notice('info', 'Draft config loaded into the builder — review it on the Schema tab; it is a suggestion, never authoritative.');
                 st.ui.activeTab = 'schema';
                 persistSession(st);

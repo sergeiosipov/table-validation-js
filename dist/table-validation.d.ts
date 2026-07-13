@@ -1,6 +1,6 @@
 /*!
- * table-validation v1.2.1 — hand-authored TypeScript declarations for the Browser JS
- * profile (Core Specification v1.2.1 + Authoring, Ingestion & Inference Addendum v1.2.1).
+ * table-validation v1.3.0 — hand-authored TypeScript declarations for the Browser JS
+ * profile (Core Specification v1.3.0 + Authoring, Ingestion & Inference Addendum v1.3.0).
  * The runtime is a single IIFE exposing one global, `TableValidation`; these
  * declarations describe that global. No build step — this file is authored by hand,
  * kept in lockstep with dist/table-validation.js, and served from the same CDN tag.
@@ -42,6 +42,10 @@ declare namespace TableValidation {
         groupingSeparators: string[];
         /** §3.5 (1.2.0): accept bare decimals — ".85" reads as 0.85. Default false; requires a non-null decimalSeparator. */
         allowBareDecimal?: boolean;
+        /** §3.5 (1.3.0): how negatives are written — "(1,234.50)" or "1234.50-". Default "leadingSign". */
+        negativeStyle?: 'leadingSign' | 'parentheses' | 'trailingMinus';
+        /** §3.5 (1.3.0): optional CSVW-style lexical constraint on the unsigned body, e.g. "#,##0.00" or "0.0000". Default null. */
+        pattern?: string | null;
     }
 
     type SeverityLevel = 'error' | 'warning';
@@ -82,7 +86,7 @@ declare namespace TableValidation {
         stopOnFail?: boolean;
         unique?: { enabled?: boolean; nullsEqual?: boolean };
         nullHandling?: { nullEquivalents?: string[] | null };
-        evaluation?: { strictType?: boolean | null };
+        evaluation?: { strictType?: boolean | null; twoDigitYearPivot?: number | null };
         type: TypeBlock;
     }
 
@@ -212,7 +216,7 @@ declare namespace TableValidation {
             stopPolicy?: 'never' | 'firstError';
         };
         nullHandling?: { nullEquivalents?: string[] };
-        evaluation?: { strictType?: boolean; timezone?: string };
+        evaluation?: { strictType?: boolean; timezone?: string; twoDigitYearPivot?: number };
         structure?: {
             columnMatching?: 'byName' | 'byPosition';
             fieldNameMatching?: StringMatchStrategy;

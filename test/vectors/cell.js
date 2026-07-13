@@ -250,4 +250,115 @@
             cellRegister: [{ row: 1, ruleName: 'rangeBreach', value: 5, context: { constraint: 'length' } }],
         },
     });
+
+    // ---------------- v1.3.0: NumberFormat negativeStyle + pattern ----------------
+
+    V({
+        name: 'negativeStyle parentheses (1.3.0): "(1,234.50)" reads as -1234.50; leading minus rejects',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' }, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                amt: {
+                    type: {
+                        name: 'float',
+                        formats: [{ decimalSeparator: '.', groupingSeparators: [','], negativeStyle: 'parentheses' }],
+                        value: { min: -1234.5, max: 100, minInclusive: true, maxInclusive: true },
+                    },
+                },
+            },
+        },
+        table: { headers: ['amt'], rows: [['(1,234.50)'], ['12.00'], ['-1,234.50']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 2, ruleName: 'typeMismatch' }],   // accounting notation only (leading
+            // minus + grouping: the format rejects the sign, the direct-parse fallback the comma)
+        },
+    });
+
+    V({
+        name: 'negativeStyle trailingMinus (1.3.0): SAP "1234.50-" reads as -1234.50; precision stays lexical',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' }, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                amt: {
+                    type: {
+                        name: 'float',
+                        formats: [{ decimalSeparator: '.', groupingSeparators: [], negativeStyle: 'trailingMinus' }],
+                        value: { min: -2000, max: 0, minInclusive: true, maxInclusive: false },
+                        precision: { min: 2, max: 2, minInclusive: true, maxInclusive: true },
+                    },
+                },
+            },
+        },
+        table: { headers: ['amt'], rows: [['1234.50-']] },
+        expect: { valid: true, summary: { bySeverity: { error: 0, warning: 0 } } },
+    });
+
+    V({
+        name: 'mixed sign notations coexist via the formats array (1.3.0): leadingSign + parentheses',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' }, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                amt: {
+                    type: {
+                        name: 'float',
+                        formats: [
+                            { decimalSeparator: '.', groupingSeparators: [','] },
+                            { decimalSeparator: '.', groupingSeparators: [','], negativeStyle: 'parentheses' },
+                        ],
+                    },
+                },
+            },
+        },
+        table: { headers: ['amt'], rows: [['-12.00'], ['(3.50)'], ['7.25']] },
+        expect: { valid: true, summary: { bySeverity: { error: 0, warning: 0 } } },
+    });
+
+    V({
+        name: 'pattern (1.3.0): "#,##0.00" enforces grouping positions and two decimals (CSVW hard constraint)',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' }, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                amt: {
+                    type: {
+                        name: 'float',
+                        formats: [{ decimalSeparator: '.', groupingSeparators: [','], pattern: '#,##0.00' }],
+                    },
+                },
+            },
+        },
+        table: { headers: ['amt'], rows: [['1,234.50'], ['234.50'], ['1234.50'], ['1,234.5']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 2, warning: 0 } },
+            cellRegister: [
+                { row: 2, ruleName: 'typeMismatch' },   // pattern suppresses the direct-parse fallback
+                { row: 3, ruleName: 'typeMismatch' },
+            ],
+        },
+    });
+
+    V({
+        name: 'pattern (1.3.0): "0.0000" — exactly four decimals; zero forms unbroken elsewhere',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' }, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                a: { type: { name: 'float', formats: [{ decimalSeparator: '.', groupingSeparators: [], pattern: '0.0000' }] } },
+                b: { type: { name: 'float', formats: [{ decimalSeparator: '.', groupingSeparators: [','] }] } },
+            },
+        },
+        table: { headers: ['a', 'b'], rows: [['6.1600', '0'], ['6.16', '-0']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 1, field: 'a', ruleName: 'typeMismatch' }],
+        },
+    });
+
 })();
