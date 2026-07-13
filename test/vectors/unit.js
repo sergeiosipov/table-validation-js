@@ -7,10 +7,10 @@
     const SIMPLE = () => ({ meta: META, columns: { a: { type: { name: 'string' } } } });
 
     U('constants — VERSION, SPEC_VERSION, result.specVersion', (t) => {
-        t.assertEq(TV().VERSION, '1.3.0', 'VERSION');
-        t.assertEq(TV().SPEC_VERSION, '1.3.0', 'SPEC_VERSION');
+        t.assertEq(TV().VERSION, '1.3.1', 'VERSION');
+        t.assertEq(TV().SPEC_VERSION, '1.3.1', 'SPEC_VERSION');
         const r = TV().validate(SIMPLE(), { headers: ['a'], rows: [] });
-        t.assertEq(r.specVersion, '1.3.0', 'result.specVersion');
+        t.assertEq(r.specVersion, '1.3.1', 'result.specVersion');
     });
 
     U('config errors — thrown only for caller mistakes, never for schema content', (t) => {
@@ -185,4 +185,81 @@
         t.assertEq(result.validWithWarnings, true, 'with warnings');
         t.assertEq(result.summary.bySeverity.warning, 1, 'one warning (-3,00)');
     }, { needsLuxon: true });
+
+    U('exportComparisonXlsx refuses without cellRegister (1.3.1)', async (t) => {
+        const schema = {
+            meta: META,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { id: { type: { name: 'int' } }, v: { type: { name: 'int' } } },
+            comparison: { match: { keys: ['id'] } },
+        };
+        const produced = { headers: ['id', 'v'], rows: [['1', '2']] };
+        const expected = { headers: ['id', 'v'], rows: [['1', '3']] };
+        const noReg = TV().compare(schema, produced, expected);
+        t.assert(!Array.isArray(noReg.cellRegister), 'fixture sanity: no register collected');
+        let err = null;
+        try { await TV().exportComparisonXlsx({ result: noReg, table: produced, schema, expected }); }
+        catch (e) { err = e; }
+        t.assert(err && err.name === 'TableValidationConfigError',
+            'rejects with TableValidationConfigError (pre-1.3.1: silently empty Errors sheet)');
+        t.assert(err && err.message.includes('collectCellRegister'), 'message names the missing setting');
+        // with the register the export resolves to a Blob
+        const schema2 = Object.assign({}, schema, { resultConfig: { collectCellRegister: true } });
+        const withReg = TV().compare(schema2, produced, expected);
+        const blob = await TV().exportComparisonXlsx({ result: withReg, table: produced, schema: schema2, expected });
+        t.assert(blob instanceof Blob, 'resolves to a Blob with the register present');
+    }, { needsExcelJS: true });
+
+    U('export Go To + highlights (1.3.1)', async (t) => {
+        // (a) validation export: an extraColumn entry links to the extra column's own header cell
+        const schema = {
+            meta: META, resultConfig: { collectCellRegister: true },
+            columns: { a: { type: { name: 'string' } } },       // allowExtraColumns defaults to false
+        };
+        const table = { headers: ['a', 'extra'], rows: [['x', 'y']] };
+        const result = TV().validate(schema, table);
+        t.assert(result.cellRegister.some((e) => e.ruleName === 'extraColumn' && e.field === 'extra'),
+            'fixture sanity: extraColumn against the raw header');
+        const blob = await TV().exportXlsx({ result, table, schema });
+        const wb = new globalThis.ExcelJS.Workbook();
+        await wb.xlsx.load(await blob.arrayBuffer());
+        let goTo = null;
+        wb.getWorksheet('Errors').eachRow((row, n) => {
+            if (n > 1 && row.getCell(3).value === 'extraColumn') goTo = row.getCell(8).value;
+        });
+        t.assert(goTo !== null && goTo.hyperlink === "#'Data'!B1",
+            'Go To targets the extra column\'s own header cell, not A1');
+        const hdr = wb.getWorksheet('Data').getRow(1).getCell(2);
+        t.assert(hdr.fill && hdr.fill.fgColor && hdr.fill.fgColor.argb === 'FFFFC7CE',
+            'extra column header carries the error severity fill');
+
+        // (b) comparison export: the [t] type tag + the 9-column Errors sheet with Go To links
+        const cschema = {
+            meta: META, resultConfig: { collectCellRegister: true },
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { id: { type: { name: 'int' } }, v: { type: { name: 'skip' } } },
+            comparison: { match: { keys: ['id'] } },
+        };
+        const produced = { headers: ['id', 'v'], rows: [[1, 1]] };
+        const expected = { headers: ['id', 'v'], rows: [[1, 'x']] };
+        const cres = TV().compare(cschema, produced, expected);
+        t.assertEq(cres.diff.rows[0].cells.v.tier, 'crossTypeMismatch', 'fixture sanity: cross-type cell');
+        const cblob = await TV().exportComparisonXlsx({ result: cres, table: produced, schema: cschema, expected });
+        const cwb = new globalThis.ExcelJS.Workbook();
+        await cwb.xlsx.load(await cblob.arrayBuffer());
+        const vText = String(cwb.getWorksheet('Comparison').getRow(2).getCell(4).value);
+        t.assert(vText.endsWith('[t]'), 'crossTypeMismatch cell text carries the [t] type tag');
+        const cerrs = cwb.getWorksheet('Errors');
+        t.assertEq(cerrs.getRow(1).values.slice(1),
+            ['#', 'Severity', 'Check', 'Column', 'Row', 'Message', 'Scope', 'Match Status', 'Go To'],
+            'Errors sheet: 9 columns incl. the Go To header');
+        let entries = 0, links = 0;
+        cerrs.eachRow((row, n) => {
+            if (n === 1) return;
+            entries++;
+            const v = row.getCell(9).value;
+            if (v && v.hyperlink) links++;
+        });
+        t.assert(entries > 0 && links === entries, 'every Errors entry carries a Go To hyperlink object');
+    }, { needsExcelJS: true });
 })();

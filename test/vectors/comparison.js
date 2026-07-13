@@ -24,7 +24,7 @@
         const schema = baseSchema({ match: { keys: ['id'] } });
         const r = TV().compare(schema, T([['1', 'a', '1.0']]), T([['1', 'a', '1.0']]));
         t.assertEq(r.engine, 'compare', 'engine tag');
-        t.assertEq(r.specVersion, '1.3.0', 'specVersion');
+        t.assertEq(r.specVersion, '1.3.1', 'specVersion');
         t.assert(!!r.diff && Array.isArray(r.diff.rows), 'diff.rows present');
         t.assertEq(r.aborted, false, 'not aborted');
         t.assertEq(r.summary.rowsChecked, 1, 'rowsChecked = |diff.rows|');
@@ -241,5 +241,149 @@
         // and the abort, when it fires, is still error + aborted regardless of the mapping
         const dup = TV().compare(schema, T([['1', 'a', '1'], ['1', 'b', '2']]), T([['1', 'a', '1']]));
         t.assertEq(dup.abortReason, 'duplicateMatchKey', 'abort not downgradable');
+    });
+
+    // ---------------- v1.3.1 regression vectors ----------------
+
+    // scoped schema: id (int key) + region (scope column) + amount (float)
+    const scopedSchema = (scope) => ({
+        meta: META, resultConfig: { collectCellRegister: true },
+        evaluation: { strictType: false, timezone: 'utc' },
+        structure: { columnMatching: 'byName' },
+        columns: {
+            id: { type: { name: 'int' } },
+            region: { type: { name: 'string' } },
+            amount: { type: { name: 'float' } },
+        },
+        comparison: { match: { keys: ['id'] }, scope },
+    });
+    const TS = (rows) => ({ headers: ['id', 'region', 'amount'], rows });
+
+    U('scope: compare policy (1.3.1)', (t) => {
+        // scoped comparisons crashed outright before v1.3.1 — pin the whole path
+        const r = TV().compare(scopedSchema({ column: 'region', inScopeValues: ['EU'] }),
+            TS([['1', 'EU', '10'], ['2', 'US', '20']]),
+            TS([['1', 'EU', '10'], ['2', 'US', '21']]));
+        t.assertEq(r.aborted, false, 'no abort');
+        const r1 = r.diff.rows.find((x) => x.matchKey[0][1] === 1);
+        const r2 = r.diff.rows.find((x) => x.matchKey[0][1] === 2);
+        t.assertEq(r1.inScope, true, 'EU row in scope');
+        t.assertEq(r1.cells.amount.rollup, 'equal', 'EU row equal');
+        t.assertEq(r2.inScope, false, 'US row tagged out of scope');
+        t.assertEq(r2.cells.amount.tier, 'valueMismatch',
+            'compare policy still compares (and reports) out-of-scope rows');
+        const vm = r.cellRegister.find((e) => e.ruleName === 'valueMismatch');
+        t.assertEq(vm.context.inScope, false, 'register entry carries inScope: false');
+    });
+
+    U('scope: skip policy excludes rows and denominators (1.3.1)', (t) => {
+        const r = TV().compare(scopedSchema({ column: 'region', inScopeValues: ['EU'], outOfScopePolicy: 'skip' }),
+            TS([['1', 'EU', '1']]),
+            TS([['1', 'EU', '1'], ['2', 'US', '2']]));
+        t.assertEq(r.diff.rows.length, 1, 'the skipped US orphan produces NO diff row');
+        t.assertEq(r.summary.bySeverity.error, 0, 'zero error entries');
+        t.assertEq(r.summary.rowsMissing, 0, 'skipped ≠ missing');
+        t.assertEq(r.diff.summary.orphanRateExpected, 0, 'skipped rows leave the denominator too');
+        t.assertEq(r.valid, true, 'clean');
+    });
+
+    U('reportAndExclude: orphan-rate denominators exclude excluded rows (1.3.1)', (t) => {
+        const schema = baseSchema({
+            match: { keys: ['id'], onDuplicateKey: 'reportAndExclude' },
+            severity: { duplicateMatchKey: 'none' },
+        });
+        // expected id 1 duplicated → key-global exclusion removes BOTH expected id-1 rows
+        // AND the produced id-1 carrier; id 2 is genuinely missing
+        const r = TV().compare(schema,
+            T([['1', 'x', '1']]),
+            T([['1', 'x', '1'], ['1', 'y', '2'], ['2', 'z', '3']]));
+        t.assertEq(r.summary.rowsExcluded, 3, 'two expected dups + the produced carrier excluded');
+        t.assertEq(r.summary.rowsMissing, 1, 'id 2 missing');
+        t.assertEq(r.diff.summary.orphanRateExpected, 1.0,
+            'denominator = 3 expected − 2 excluded = 1 (pre-1.3.1: wrongly 1/3)');
+    });
+
+    U('comparison default messages render (1.3.1)', (t) => {
+        // pre-1.3.1 the register carried the bare rule name as the message
+        const r = TV().compare(baseSchema({ match: { keys: ['id'] } }),
+            T([['1', 'a', '1']]),
+            T([['1', 'a', '2'], ['2', 'b', '5']]));
+        const vm = r.cellRegister.find((e) => e.ruleName === 'valueMismatch');
+        t.assertEq(vm.message, 'amount: produced "1" ≠ expected "2"',
+            'normative §15.10 template; fmtVal JSON-quotes raw string cells');
+        t.assert(vm.message !== 'valueMismatch', 'not the pre-1.3.1 bare rule name');
+        const rm = r.cellRegister.find((e) => e.ruleName === 'rowMissing');
+        t.assert(rm.message.startsWith('Expected row '), 'rowMissing template prefix');
+        t.assert(rm.message.includes('has no produced counterpart'), 'rowMissing template body');
+    });
+
+    U('maxCandidatePairsExceeded is its own rule name (1.3.1)', (t) => {
+        const schema = {
+            meta: META, resultConfig: { collectCellRegister: true },
+            evaluation: { strictType: false, timezone: 'utc' },
+            structure: { columnMatching: 'byName' },
+            columns: { id: { type: { name: 'string' } }, name: { type: { name: 'string' } } },
+            comparison: { match: {
+                keys: ['id', 'name'],
+                fuzzy: { components: ['name'], threshold: 0.5, maxCandidatePairs: 1 },
+            } },
+        };
+        const H = (rows) => ({ headers: ['id', 'name'], rows });
+        // disjoint ids → exact pairing leaves a 2 × 2 residue > maxCandidatePairs
+        const r = TV().compare(schema, H([['1', 'aa'], ['2', 'bb']]), H([['3', 'aa'], ['4', 'bb']]));
+        t.assertEq(r.aborted, true, 'aborted');
+        t.assertEq(r.abortReason, 'maxCandidatePairsExceeded', 'its own abort reason');
+        t.assertEq(r.cellRegister.length, 1, 'a single register entry');
+        const e = r.cellRegister[0];
+        t.assertEq(e.ruleName, 'maxCandidatePairsExceeded', 'own rule name (pre-1.3.1: duplicateMatchKey)');
+        t.assertEq(e.context.candidatePairs, 4, 'candidate pairs counted');
+        t.assertEq(e.context.maxCandidatePairs, 1, 'configured cap in context');
+        t.assert(e.message.includes('candidate pairs exceed maxCandidatePairs'), 'default message renders');
+    });
+
+    U('toleranceMatch context carries toleranceSource (1.3.1)', (t) => {
+        const mk = (tolerance) => baseSchema({
+            match: { keys: ['id'] },
+            fields: { amount: { tolerance } },
+            severity: { toleranceMatch: 'warning' },
+        });
+        const abs = TV().compare(mk(0.05), T([['1', 'x', '1.02']]), T([['1', 'x', '1.00']]));
+        const ea = abs.cellRegister.find((e) => e.ruleName === 'toleranceMatch');
+        t.assertEq(ea.context.toleranceSource, 'absolute', 'numeric spec → absolute');
+        t.assertEq(ea.context.field, 'amount', 'field named');
+        t.assert(Math.abs(ea.context.delta - 0.02) < 1e-9, 'delta present');
+        t.assertEq(ea.context.tolerance, 0.05, 'resolved ε present');
+        const rel = TV().compare(mk({ percent: 10, of: 'amount' }), T([['1', 'x', '1.02']]), T([['1', 'x', '1.00']]));
+        const er = rel.cellRegister.find((e) => e.ruleName === 'toleranceMatch');
+        t.assertEq(er.context.toleranceSource, 'relative:10%@amount', 'percent spec → §15.8 relative tag');
+    });
+
+    U('fuzzy contexts complete (1.3.1)', (t) => {
+        const schema = {
+            meta: META, resultConfig: { collectCellRegister: true },
+            evaluation: { strictType: false, timezone: 'utc' },
+            structure: { columnMatching: 'byName' },
+            columns: { id: { type: { name: 'string' } }, name: { type: { name: 'string' } } },
+            comparison: {
+                match: {
+                    keys: ['id', 'name'],
+                    fuzzy: { components: ['name'], threshold: 0.5, metric: 'tokenizedFuzzy', ambiguityMargin: 0.5 },
+                },
+                severity: { fuzzyKeyMatch: 'warning', ambiguousFuzzyMatch: 'warning', rowMissing: 'none' },
+            },
+        };
+        const H = (rows) => ({ headers: ['id', 'name'], rows });
+        // three candidates with distinct similarities; the wide margin also fires ambiguity
+        const r = TV().compare(schema,
+            H([['1', 'Acme Corporation']]),
+            H([['1', 'Acme Corp'], ['1', 'Acme Co'], ['1', 'Zeta Industries']]));
+        const fk = r.cellRegister.find((e) => e.ruleName === 'fuzzyKeyMatch');
+        t.assert(Array.isArray(fk.context.matchKey), 'matchKey is an array, never null');
+        t.assertEq(typeof fk.context.similarity, 'number', 'similarity number');
+        t.assertEq(typeof fk.context.runnerUpSimilarity, 'number', 'runner-up similarity number');
+        t.assertEq(fk.context.components, ['name'], 'components echo the fuzzy config');
+        const am = r.cellRegister.find((e) => e.ruleName === 'ambiguousFuzzyMatch');
+        t.assertEq(am.context.ambiguityMargin, 0.5, 'ambiguityMargin echoed');
+        t.assertEq(am.context.components, ['name'], 'shared context shape');
     });
 })();

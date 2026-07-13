@@ -94,4 +94,47 @@
             clean();
         },
     });
+
+    U.push({
+        suite, name: 'setOwn hardening (1.3.1): a column named "__proto__" flows through summaries, canonicalize, preview, and compare',
+        fn: ({ assert, assertEq }) => {
+            // JSON.parse is the only reliable way to get "__proto__" as an OWN key
+            const mkCfg = () => JSON.parse('{"meta":{"schemaVersion":"1.0.0","name":"p"},' +
+                '"resultConfig":{"collectCellRegister":true},' +
+                '"evaluation":{"strictType":false,"timezone":"utc"},' +
+                '"columns":{"__proto__":{"type":{"name":"int"}}},' +
+                '"comparison":{"match":{"keys":["__proto__"]}}}');
+            const own = (o) => Object.prototype.hasOwnProperty.call(o, '__proto__');
+            const clean = () => assert(({}).polluted === undefined, 'Object.prototype polluted');
+            assert(own(mkCfg().columns), 'fixture sanity: JSON.parse yields an own key');
+
+            // (a) validate() a failing table → own byColumn key, intact prototype, no pollution
+            const r = TV().validate(mkCfg(), { headers: ['__proto__'], rows: [['x']] });
+            assertEq(r.valid, false, 'typeMismatch fires on the hostile-named column');
+            assert(own(r.summary.byColumn), 'summary.byColumn carries the OWN key');
+            assertEq(r.summary.byColumn['__proto__'].error, 1, 'counts land under it');
+            assert(Object.getPrototypeOf(r.summary.byColumn) === Object.prototype, 'byColumn prototype not corrupted');
+            clean();
+
+            // (b) canonical form (createConfigBuilder(cfg).build() ≡ canonicalizeConfig)
+            const out = TV().createConfigBuilder(mkCfg()).build();
+            assert(own(out.columns), 'canonicalized columns keep the own key');
+            assert(Object.getPrototypeOf(out.columns) === Object.prototype, 'canonical columns prototype intact');
+            clean();
+
+            // (c) resolvedPreview
+            const rp = TV().createConfigBuilder(mkCfg()).resolvedPreview();
+            assert(own(rp.columns), 'resolvedPreview keeps the own key');
+            assert(Object.getPrototypeOf(rp.columns) === Object.prototype, 'preview columns prototype intact');
+            clean();
+
+            // (d) compare() with the column keyed AND compared → own key on each diff row's cells
+            const cmp = TV().compare(mkCfg(),
+                { headers: ['__proto__'], rows: [['1']] }, { headers: ['__proto__'], rows: [['1']] });
+            assertEq(cmp.aborted, false, 'compare runs');
+            assert(cmp.diff.rows.length === 1 && cmp.diff.rows.every((rd) => own(rd.cells)),
+                'diff row cells carry the own key');
+            clean();
+        },
+    });
 })();

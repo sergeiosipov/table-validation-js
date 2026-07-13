@@ -554,7 +554,15 @@
                         ? slot.pastedText
                         : ((spec.format === 'jsonArrays' || spec.format === 'jsonObjects')
                             ? await slot.file.text() : slot.file);
-                    const r = await TV().ingest(source, spec);
+                    // §8: ingest routes through the engine worker over http(s) — strings and
+                    // File/Blob sources structured-clone fine, and the console never registers
+                    // host normalization functions (documented v1 exclusion), so no registry
+                    // guard is needed here. From file:// (or with workers unavailable) the
+                    // main-thread call below keeps the console fully functional.
+                    const w = getEngineWorker();
+                    const r = w
+                        ? await w.call('ingest', [source, spec])
+                        : await TV().ingest(source, spec);
                     slot.status = 'ready';
                     slot.table = r.table;
                     slot.provenance = r.source;
@@ -595,7 +603,7 @@
                 // but cannot be addressed by the per-column dotted-path editor — say so now
                 const awkward = Object.keys(st.inference.offer.draft.columns || {}).filter((n) => /[.[\]]/.test(n));
                 if (awkward.length) {
-                    notice('warning', 'Column name(s) ' + awkward.map((n) => JSON.stringify(n)).join(', ') +
+                    notice('warn', 'Column name(s) ' + awkward.map((n) => JSON.stringify(n)).join(', ') +
                         ' contain "." or brackets — validation works, but the per-column editor cannot address such names. Rename the source header (or the column on the Schema tab) to edit them.');
                 }
                 notice('info', 'Draft config loaded into the builder — review it on the Schema tab; it is a suggestion, never authoritative.');

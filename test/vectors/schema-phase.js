@@ -239,4 +239,74 @@
         expect: { valid: false, aborted: true, abortReason: 'schemaInvalid' },
     });
 
+    // ---------------- v1.3.1: rules 21 (SSSSSS is a time token) + 53 (byRule keys) ----------------
+
+    V({
+        name: 'rule 21 (1.3.1): date formats reject SSSSSS',
+        needsLuxon: true,
+        schema: {
+            meta: { schemaVersion: '1.3.1', name: 't' },
+            columns: { d: { type: { name: 'date', formats: ['yyyy-MM-dd.SSSSSS'] } } },
+        },
+        table: { headers: ['d'], rows: [] },
+        expect: {
+            valid: false, aborted: true, abortReason: 'schemaInvalid',
+            summary: {
+                bySeverity: { error: 1 },
+                details: [{ ruleName: 'schemaValidationError', context: { path: 'columns.d.type.formats[0]' } }],
+            },
+        },
+    });
+
+    V({
+        name: 'rule 21 (1.3.1): SSSSSS stays legal on datetime formats',
+        needsLuxon: true,
+        schema: {
+            meta: { schemaVersion: '1.3.1', name: 't' },
+            columns: { d: { type: { name: 'datetime', formats: ['yyyy-MM-dd HH:mm:ss.SSSSSS'] } } },
+        },
+        table: { headers: ['d'], rows: [] },
+        expect: { valid: true, aborted: false },
+    });
+
+    V({
+        name: 'rule 53 (1.3.1): severity.byRule keys must name emittable rules',
+        schema: {
+            meta: { schemaVersion: '1.3.1', name: 't' },
+            columns: { a: { severity: { default: 'error', byRule: { notARealRule: 'warning' } }, type: { name: 'string' } } },
+        },
+        table: { headers: ['a'], rows: [] },
+        expect: {
+            valid: false, aborted: true, abortReason: 'schemaInvalid',
+            summary: {
+                details: [{ ruleName: 'schemaValidationError', context: { path: 'columns.a.severity.byRule.notARealRule' } }],
+            },
+        },
+    });
+
+    V({
+        name: 'rule 53 (1.3.1): structural rule names are not column-emittable',
+        schema: {
+            meta: { schemaVersion: '1.3.1', name: 't' },
+            columns: { a: { severity: { default: 'error', byRule: { rowCountBreach: 'warning' } }, type: { name: 'string' } } },
+        },
+        table: { headers: ['a'], rows: [] },
+        expect: {
+            valid: false, aborted: true, abortReason: 'schemaInvalid',
+            summary: {
+                details: [{ ruleName: 'schemaValidationError', context: { path: 'columns.a.severity.byRule.rowCountBreach' } }],
+            },
+        },
+    });
+
+    V({
+        name: 'rule 53 (1.3.1): the §5.6 fixed list is accepted',
+        schema: {
+            meta: { schemaVersion: '1.3.1', name: 't' },
+            columns: { a: { severity: { default: 'error', byRule: { rangeBreach: 'warning' } }, type: { name: 'string' } } },
+        },
+        table: { headers: ['a'], rows: [] },
+        expect: { valid: true, aborted: false },
+    });
+
 })();

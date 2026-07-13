@@ -500,4 +500,23 @@
         },
     });
 
+    U.push({
+        suite, name: 'normalization (1.3.1): non-scalar cells pass through built-ins as no-ops',
+        fn: async ({ assert, assertEq }) => {
+            // pre-1.3.1 the trim pass threw normalizationFunctionContractViolation on the object cell
+            const r = await TV().ingest([[{ nested: 1 }, ' x ']], {
+                format: 'jsonArrays', normalization: { table: [{ fn: 'trim' }] },
+            });
+            assertEq(r.table.rows[0][0], { nested: 1 }, 'object cell arrives unchanged in the output table');
+            assertEq(r.table.rows[0][1], 'x', 'sibling strings still trimmed');
+            assertEq(r.normalizationActions, [{ column: 1, fn: 'trim', count: 1 }],
+                'only genuinely changed cells counted — the untouched object cell contributes 0');
+            // a host fn RETURNING a new non-scalar remains a contract violation
+            await expectCode(assert, TV().ingest([[{ nested: 1 }]], {
+                format: 'jsonArrays', normalization: { table: [{ fn: 'swap' }] },
+            }, { normalizationFunctions: { swap: () => ({ other: 2 }) } }),
+                'normalizationFunctionContractViolation', 'CHANGED non-scalars still violate the contract');
+        },
+    });
+
 })();

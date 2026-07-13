@@ -248,4 +248,28 @@
             assertEq(b.get('resultConfig.maxSamples'), undefined, 'unset restores engine default');
         },
     });
+
+    U.push({
+        suite, name: 'resolvedPreview fills and preserves twoDigitYearPivot (1.3.1)',
+        fn: ({ assertEq }) => {
+            const seed = () => ({
+                meta: { schemaVersion: '1.0.0', name: 'pv' },
+                columns: { d: { type: { name: 'date', formats: ['dd/MM/yy'] } } },
+            });
+            // no pivot anywhere → the §5.4 default appears in the preview
+            const rp0 = TV().createConfigBuilder(seed()).resolvedPreview();
+            assertEq(rp0.evaluation.twoDigitYearPivot, 1961, 'default pivot filled');
+            // table-level pivot survives
+            const s1 = seed();
+            s1.evaluation = { strictType: true, timezone: 'utc', twoDigitYearPivot: 1900 };
+            assertEq(TV().createConfigBuilder(s1).resolvedPreview().evaluation.twoDigitYearPivot, 1900,
+                'authored table-level pivot kept');
+            // column-level pivot survives into the column evaluation (pre-1.3.1: silently dropped)
+            const s2 = seed();
+            s2.columns.d.evaluation = { twoDigitYearPivot: 1930 };
+            const rp2 = TV().createConfigBuilder(s2).resolvedPreview();
+            assertEq(rp2.columns.d.evaluation.twoDigitYearPivot, 1930, 'column pivot preserved');
+            assertEq(rp2.columns.d.evaluation.strictType, true, 'strictType still resolved alongside');
+        },
+    });
 })();
