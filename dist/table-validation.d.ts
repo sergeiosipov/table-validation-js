@@ -607,7 +607,7 @@ declare namespace TableValidation {
     // Public API (JS profile §3)
     // ================================================================
 
-    /** Unified release version — equals SPEC_VERSION ("1.0.0"). */
+    /** Unified release version — always equals the engine's current SPEC_VERSION constant. */
     const VERSION: string;
     /** Implemented Core Spec version; stamped as result.specVersion. */
     const SPEC_VERSION: string;

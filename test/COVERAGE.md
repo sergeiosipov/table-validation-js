@@ -6,7 +6,7 @@ Every vector also runs through the purity harness (inputs deep-frozen) and the d
 
 | Rule name (Core §9.1) | Covering vector file | Vector |
 |---|---|---|
-| `schemaValidationError` | [vectors/schema-phase.js](vectors/schema-phase.js) | missing meta; Range min>max (rule 13); unknown column ref (rule 28); regexFlags `g` (rule 24); byPosition trailing suffix (rule 42); bool overlap (rule 43); datetime component coverage (rule 21); comparison class (rule 34) |
+| `schemaValidationError` | [vectors/schema-phase.js](vectors/schema-phase.js) | missing meta; Range min>max (rule 13); unknown column ref (rule 28); regexFlags `g` (rule 24); byPosition trailing suffix (rule 42); bool overlap (rule 43); datetime component coverage (rule 21); comparison class (rule 34); NumberFormat `negativeStyle`/`pattern` schema-shape (rule 12, 1.3.0); `evaluation.twoDigitYearPivot` out of range (rule 58, 1.3.0) |
 | `irrelevantSetting` | [vectors/schema-phase.js](vectors/schema-phase.js) | byPosition name machinery + strict-mode formats infos |
 | `headersMissing` | [vectors/structural.js](vectors/structural.js) | byName with null headers |
 | `columnCountBreach` | [vectors/structural.js](vectors/structural.js) | byPosition too-few columns |
@@ -20,8 +20,8 @@ Every vector also runs through the purity harness (inputs deep-frozen) and the d
 | `allNullRow` | [vectors/structural.js](vectors/structural.js) | row-scoped entry |
 | `duplicateRow` | [vectors/structural.js](vectors/structural.js) | interpreted equality (`"01"` vs `1`) |
 | `nullabilityViolation` | [vectors/cell.js](vectors/cell.js) | native null + null-equivalent string |
-| `typeMismatch` | [vectors/cell.js](vectors/cell.js), [vectors/parser-negatives.js](vectors/parser-negatives.js), [vectors/temporal.js](vectors/temporal.js) | strict/non-strict, NumberFormat, bool lists, non-scalar cells, temporal formats |
-| `rangeBreach` | [vectors/cell.js](vectors/cell.js), [vectors/temporal.js](vectors/temporal.js) | constraints `value`, `length` (code points), `precision`, temporal value ranges |
+| `typeMismatch` | [vectors/cell.js](vectors/cell.js), [vectors/parser-negatives.js](vectors/parser-negatives.js), [vectors/temporal.js](vectors/temporal.js) | strict/non-strict, NumberFormat, bool lists, non-scalar cells, temporal formats; `negativeStyle` parentheses/trailingMinus, mixed sign-notation formats array, `pattern` grouping/decimal enforcement (cell.js, 1.3.0); `yy` exact-two-digit pin and six-digit `SSSSSS` fractional seconds (temporal.js, 1.3.0) |
+| `rangeBreach` | [vectors/cell.js](vectors/cell.js), [vectors/temporal.js](vectors/temporal.js) | constraints `value`, `length` (code points), `precision`, temporal value ranges; pivot-mapped `yy` years (e.g. `61` → `1961`) feed the same value-range check as 4-digit years (temporal.js, 1.3.0) |
 | `regexMismatch` | [vectors/cell.js](vectors/cell.js) | pattern + null flags |
 | `categoryMismatch` | [vectors/cell.js](vectors/cell.js) | non-strict categorical with matchStrategy |
 | `uniquenessViolation` | [vectors/aggregate.js](vectors/aggregate.js) | every occurrence incl. first; interpreted equality; `nullsEqual` both ways |
@@ -81,13 +81,25 @@ Every vector also runs through the purity harness (inputs deep-frozen) and the d
 | `comparison.fields.<col>.expectedName` (alias pairing, logical names in results, byPosition advisory) | [vectors/comparison.js](vectors/comparison.js) |
 | `comparison.match.onDuplicateKey` (`abort` default unchanged; `reportAndExclude` group violation, key-global exclusion, severity map incl. `none`, dead-knob advisory) | [vectors/comparison.js](vectors/comparison.js) |
 | Inference `allAcceptingFormats` (all-accepting drafts, union coverage for mixed formats, determinism) | [vectors/infer.js](vectors/infer.js) — needs Luxon |
+| `allowBareDecimal` (1.2.0): normalization `reformatNumber` canonicalizes `".85"`/`"-.02"` to `"0.85"`/`"-0.02"`; inference drafts and self-validates `.85`-style floats | [vectors/ingest.js](vectors/ingest.js), [vectors/infer.js](vectors/infer.js) — needs Luxon |
+| Mixed-padding date families / twin-reduction (1.1.0/1.2.0): unpadded `d.M.yyyy`/`d/M/yyyy` infer high-confidence; the unpadded "twin" of a padded family is reduced out of alternatives | [vectors/infer.js](vectors/infer.js) — needs Luxon |
+| `suggestPrecision` (1.1.0): on by default, decoupled from `suggestRanges` | [vectors/infer.js](vectors/infer.js) |
+| Digit-date guard (1.1.0): `yyyyMMdd`-shaped int columns keep the int ladder order but carry a ranked date alternative (`digitDate` reason) | [vectors/infer.js](vectors/infer.js) — needs Luxon |
+| `twoDigitYearPivot` / `yy` candidates (1.3.0): two-digit-year columns infer `ambiguous` with reason `twoDigitYear`; drafts never emit the pivot (rule N4); `yy` family padding reduction; 4-digit years never reach `yy` candidates | [vectors/infer.js](vectors/infer.js) — needs Luxon; schema-side range check in [vectors/temporal.js](vectors/temporal.js) |
+| `negativeStyle`/`pattern` (1.3.0): accounting `"(1,234.50)"` and SAP `"1234.50-"` columns infer the matching `negativeStyle`; mixed sign notations stay conservative (`string`, reason `numericLike`) | [vectors/infer.js](vectors/infer.js) |
+| `SSSSSS` token (1.3.0): minute- and microsecond-precision datetime columns infer `yyyy-MM-dd HH:mm` / `yyyy-MM-dd HH:mm:ss.SSSSSS` | [vectors/infer.js](vectors/infer.js) — needs Luxon |
+| Extended null tokens (1.3.0): `#N/A`, `None`, `--`, `n/a` adopted into `nullHandling.nullEquivalents` in fixed candidate order | [vectors/infer.js](vectors/infer.js) |
+| `groupingAmbiguity` (1.3.0): `"1.234"`/`"1,234"`-shaped columns flag both the decimal and grouped-integer readings; any breaking value disambiguates silently | [vectors/infer.js](vectors/infer.js) |
+| `leadingZeroInt`/`unsafeInt` data-loss guard (1.3.0): leading-zero ids (`"007"`) and magnitudes beyond `Number.isSafeInteger` infer `string` with a ranked numeric alternative rather than lose data silently | [vectors/infer.js](vectors/infer.js) |
+| Categorical ratio 0.2 (1.3.0): a 3-distinct-value column now qualifies as `categorical` at 20 rows | [vectors/infer.js](vectors/infer.js) |
+| `numericLike`/`temporalLike` honesty (1.3.0): structured-looking values that fail every candidate (unpadded times, month names, mixed sign notations) report `confidence: "fallback"` with an honest reason instead of a bare high-confidence string fallback | [vectors/infer.js](vectors/infer.js) — needs Luxon |
 
 ## Quality program (WS6)
 
 | Requirement | Covering test file |
 |---|---|
 | Real-world file corpus: Excel shape (sharedStrings, shared formulas + cached results, date serials 1900, styled-empty used-range over-report), 1904 date system, inline strings (Sheets/LibreOffice), Excel UTF-8-BOM / ANSI CSVs, quoted DB dump (see [fixtures/README.md](fixtures/README.md) for genuine-file gaps) | [vectors/corpus.js](vectors/corpus.js) — XLSX parts need ExcelJS |
-| Fuzz: CSV serialize→ingest round-trip identity; builder build→rebuild identity + engine parity over random valid configs; inference always Phase-1-valid + deterministic; random byte streams → table or canonical code only (seeded PRNG throughout) | [vectors/fuzz.js](vectors/fuzz.js) |
+| Fuzz: CSV serialize→ingest round-trip identity; builder build→rebuild identity + engine parity over random valid configs; inference always Phase-1-valid + deterministic; **self-accepting invariant (added 1.2.1): when the sample covers the whole table, every inferred draft MUST validate that same sample with zero errors** — the permanent conformance property added after the strictType-derivation bug; random byte streams → table or canonical code only (seeded PRNG throughout) | [vectors/fuzz.js](vectors/fuzz.js) |
 | Mutation-based builder/engine parity over every `configModel` descriptor (wrong type / out-of-enum / broken dependency → both sides reject, same offending path; skips whitelisted) | [vectors/mutation.js](vectors/mutation.js) — needs Luxon |
 | Prototype pollution: `__proto__`/`constructor` keys through jsonClone, builder seed/build, ingest jsonObjects, compare — never pollute, survive as data | [vectors/quality.js](vectors/quality.js) |
 | Docs-as-tests: Core §12/§15.12 defaults tables parsed from markdown and diffed against `configModel` (rule M2); JS profile §8 examples executed verbatim | [docs-tests.js](docs-tests.js) — via node-runner.js |
@@ -101,6 +113,7 @@ Every vector also runs through the purity harness (inputs deep-frozen) and the d
 | Worker protocol §3.14: ping/init/validate/compare/ingest/inferConfig, structured-clone sanitization (temporal → ISO), error shape (name/code/detail), unknown op | [worker.html](worker.html) — serve over http |
 | Performance envelope 10⁴–10⁷ cells (WASM-baseline + console scale limits) | [bench.js](bench.js) / [bench.html](bench.html) |
 | Cross-browser gate (Chromium/Firefox/WebKit), console E2E flows (file:// main-thread + http worker), two-tab `localStorage` sync, axe-core a11y scan + keyboard pass, host-TZ robustness runs | [e2e/](e2e/README.md) drive scripts |
+| `batch-infer-standalone.html` E2E drive: mixed multi-file pick (clean CSV, JSON records, unsupported extension, corrupt XLSX) → per-file outcomes; ZIP download (configs parse, manifest names every input incl. failures); combined XLSX — Summary sheet first with a full-width autofilter, a freeze pane after the metadata columns, no wrapped cells, fitted column widths, followed by one sheet per inferred file each with its own data-header autofilter plus type/nullable review dropdowns; folder pick over `docs/examples` with relative paths and an honest non-table failure | [e2e/drive_batch_infer.py](e2e/drive_batch_infer.py) |
 | XLSX cell mapping (dates → zone-less ISO, formulas ± cached result, rich text, merged, error values), sheet selection, `sheetNotFound` | [vectors/ingest.js](vectors/ingest.js) — needs ExcelJS |
 | Ingest/validate decoupling (ingest never judges) | [vectors/ingest.js](vectors/ingest.js) |
 | Type ladder incl. formatted numbers (well-formed grouping), categorical thresholds, string fallbacks | [vectors/infer.js](vectors/infer.js) |
