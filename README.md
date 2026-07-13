@@ -15,8 +15,8 @@ Log) live in the companion spec repository
 [console UI architecture](table-validation-ui-architecture-v1.3.1.md) — live in this
 repository.
 
-[`dist/table-validation.js`](dist/table-validation.js) implements **Core Spec 1.3.0** in full
-(`VERSION === SPEC_VERSION === "1.3.0"`): the validation engine, the `compare()` comparison engine,
+[`dist/table-validation.js`](dist/table-validation.js) implements **Core Spec 1.3.1** in full
+(`VERSION === SPEC_VERSION === "1.3.1"`): the validation engine, the `compare()` comparison engine,
 the `{error, warning}` + abort severity model, per-rule/structural severities, `stopOnFail`/
 `stopPolicy`, message-template overrides, cell observations, the XLSX / annotated / comparison
 exporters — and the three tooling modules of the spec set's addendum: the **config meta-model &
@@ -46,7 +46,7 @@ The intended consumer is a locked-down corporate machine with a browser, a netwo
 to `cdn.jsdelivr.net`, and nothing else — no npm, no node, no Python:
 
 1. Download the release archive of the pinned tag
-   (`https://github.com/sergeiosipov/table-validation-js/archive/refs/tags/v1.3.0.zip`)
+   (`https://github.com/sergeiosipov/table-validation-js/archive/refs/tags/v1.3.1.zip`)
    and unzip it anywhere — or copy the folder from any machine that can.
 2. Double-click [`console.html`](console.html) — the full Authoring & Run Console, from
    `file://`. Double-click [`docs/user-guide.html`](docs/user-guide.html) — the user
@@ -100,7 +100,7 @@ Dependencies are read from `globalThis` at call time only, so ordering relative 
         integrity="sha384-dpBQTv5JJwb9sYAFI+ypp/fqKBrcVtwPmv3mRgBaVCfRyK1POem2OjC324d+kXi9" crossorigin="anonymous"></script> -->
 ```
 
-## CDN & SRI (v1.3.0)
+## CDN & SRI (v1.3.1)
 
 Tags are immutable — pin the exact version and verify it:
 
@@ -190,7 +190,7 @@ API surface: `TableValidation.validate(schema, table, options)`,
 `adapters.fromArrays` / `adapters.fromObjects`,
 `configModel` / `createConfigBuilder(seed?)`, `ingest(source, spec, options?)` (Promise\<IngestResult\>), `normalizationModel`,
 `inferConfig(table, options?)`, `TableValidationConfigError`, `TableValidationIngestError`,
-`VERSION` (`"1.3.0"`), `SPEC_VERSION` (`"1.3.0"`).
+`VERSION` (`"1.3.1"`), `SPEC_VERSION` (`"1.3.1"`).
 
 Rule of thumb: **thrown = you called the API wrong; violations in the result = the schema or
 data is wrong.** Schema *content* errors surface as `schemaValidationError` violations with
@@ -329,9 +329,9 @@ Where the specs leave latitude, this implementation chose:
 
 ## Specs
 
-The specification set shares the unified version **1.3.0**, and
+The specification set shares the unified version **1.3.1**, and
 [`dist/table-validation.js`](dist/table-validation.js) implements it
-(`VERSION === SPEC_VERSION === "1.3.0"`). The documents are split by audience:
+(`VERSION === SPEC_VERSION === "1.3.1"`). The documents are split by audience:
 
 **In this repository (JS-specific):**
 
@@ -344,8 +344,8 @@ The specification set shares the unified version **1.3.0**, and
 private, so these links require access):
 
 - [Core Specification v1.3.1](https://github.com/sergeiosipov/table-validation-spec/blob/v1.3.1/table-validation-core-spec-v1.3.1.md) — behavior (normative), incl. the comparison engine (§15) and the §16 anchor for the addendum
-- [Authoring, Ingestion & Inference Addendum v1.3.0](https://github.com/sergeiosipov/table-validation-spec/blob/v1.3.0/table-validation-authoring-tooling-addendum-v1.3.0.md) — normative core companion: config meta-model & builder (§A), `ingest()` + normalization pipeline (§B), `inferConfig()` (§C)
-- [Design-Decisions Log](https://github.com/sergeiosipov/table-validation-spec/blob/v1.3.0/table-validation-design-decisions-v1.3.0.md) — non-normative record of every resolved ambiguity, with the genuine forks flagged
+- [Authoring, Ingestion & Inference Addendum v1.3.1](https://github.com/sergeiosipov/table-validation-spec/blob/v1.3.1/table-validation-authoring-tooling-addendum-v1.3.1.md) — normative core companion: config meta-model & builder (§A), `ingest()` + normalization pipeline (§B), `inferConfig()` (§C)
+- [Design-Decisions Log](https://github.com/sergeiosipov/table-validation-spec/blob/v1.3.1/table-validation-design-decisions-v1.3.1.md) — non-normative record of every resolved ambiguity, with the genuine forks flagged
 
 ## License
 
