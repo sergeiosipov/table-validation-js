@@ -433,4 +433,40 @@
         },
     });
 
+    // ---------------- v1.2.1: strictType counts canonical conversion (self-accepting) ----------------
+
+    U.push({
+        suite, name: 'strictType (1.2.1): mixed-native-kind string column forces strictType false and self-validates',
+        fn: ({ assert, assertEq }) => {
+            const t = { headers: ['a'], rows: [[1], [true], ['x']] };
+            const { draft, report } = TV().inferConfig(t);
+            const c = report.columns[0];
+            assertEq(c.inferredType, 'string', 'mixed native kinds fall to string');
+            assertEq(c.confidence, 'fallback', 'confidence fallback');
+            assertEq(c.reasons, ['mixedNativeKinds'], 'reason mixedNativeKinds');
+            assert(c.observed.reliedOnInterpretation, 'canonical conversion counts as interpretation (1.2.1)');
+            assertEq(draft.evaluation.strictType, false, 'non-string participants force strictType false');
+            assertN1(assert, draft, 'mixedNativeKinds');
+            const run = TV().validate(draft, t);
+            assert(run.valid && !run.aborted, 'the draft validates its own sample (self-accepting invariant)');
+        },
+    });
+
+    U.push({
+        suite, name: 'strictType (1.2.1): native NaN column reports nonStringParticipants and self-validates',
+        fn: ({ assert, assertEq }) => {
+            const t = { headers: ['a'], rows: [[NaN], [1.5]] };
+            const { draft, report } = TV().inferConfig(t);
+            const c = report.columns[0];
+            assertEq(c.inferredType, 'string', 'NaN blocks every numeric step; the column falls to string');
+            assertEq(c.confidence, 'fallback', 'confidence fallback');
+            assertEq(c.reasons, ['nonStringParticipants'], 'a reason is reported (was empty before 1.2.1)');
+            assert(c.observed.reliedOnInterpretation, 'native participants in a string column rely on interpretation');
+            assertEq(draft.evaluation.strictType, false, 'strictType false');
+            assertN1(assert, draft, 'nonStringParticipants');
+            const run = TV().validate(draft, t);
+            assert(run.valid && !run.aborted, 'the draft validates its own sample (self-accepting invariant)');
+        },
+    });
+
 })();

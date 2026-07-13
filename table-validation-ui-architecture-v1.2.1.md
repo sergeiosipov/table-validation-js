@@ -1,8 +1,8 @@
 # Table Validation — Authoring & Run Console: UI Architecture Specification
 
-## Document Version: 1.2.0
+## Document Version: 1.2.1
 
-> **Document set.** This document architects the **Authoring & Run Console** — the user-facing tool that ties the tooling modules (config authoring §A, ingestion §B, inference §C of the *Authoring, Ingestion & Inference Addendum v1.2.0*, the "Addendum") to the two engines (`validate()`, `compare()`) of the *Core Specification v1.2.0* (the "Core Spec"), through the API of the *Browser JS Implementation Specification v1.2.0* (the "JS Profile"). It is an **architecture specification** — flows, information architecture, state model, component contracts, wireframe-level layout — not an implementation. UI is host-specific, so this document lives outside the engine core; it **adds no engine behavior** and reuses engine outputs verbatim.
+> **Document set.** This document architects the **Authoring & Run Console** — the user-facing tool that ties the tooling modules (config authoring §A, ingestion §B, inference §C of the *Authoring, Ingestion & Inference Addendum v1.2.1*, the "Addendum") to the two engines (`validate()`, `compare()`) of the *Core Specification v1.2.1* (the "Core Spec"), through the API of the *Browser JS Implementation Specification v1.2.1* (the "JS Profile"). It is an **architecture specification** — flows, information architecture, state model, component contracts, wireframe-level layout — not an implementation. UI is host-specific, so this document lives outside the engine core; it **adds no engine behavior** and reuses engine outputs verbatim.
 >
 > The console targets the JS Profile's no-build constraint (JS Profile §6): vanilla ES2020, static files, `<script>` tags, no bundler, no framework.
 

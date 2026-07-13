@@ -1,17 +1,17 @@
 /*!
- * table-validation v1.2.0 — schema-driven table validation & comparison engine,
+ * table-validation v1.2.1 — schema-driven table validation & comparison engine,
  * with config authoring (configModel/createConfigBuilder), ingestion (ingest),
  * and inference (inferConfig) tooling.
- * Implements: Table Validation Library — Core Specification v1.2.0 + Authoring,
- * Ingestion & Inference Addendum v1.2.0 (Browser JS profile v1.2.0).
+ * Implements: Table Validation Library — Core Specification v1.2.1 + Authoring,
+ * Ingestion & Inference Addendum v1.2.1 (Browser JS profile v1.2.1).
  * Single-file vanilla ES2020 IIFE. No dependencies bundled; reads globalThis.luxon /
  * globalThis.ExcelJS at call time only. License: MIT.
  */
 (function (global) {
     'use strict';
 
-    const VERSION = '1.2.0';
-    const SPEC_VERSION = '1.2.0';
+    const VERSION = '1.2.1';
+    const SPEC_VERSION = '1.2.1';
 
     // ================================================================
     // Errors & signals
@@ -582,7 +582,7 @@
         if (isObj(schema.meta)) {
             p1unit(() => {
                 if (!isStr(schema.meta.schemaVersion) || !SEMVER_RE.test(schema.meta.schemaVersion)) {
-                    schemaFail('meta.schemaVersion', 'semver string (e.g. "1.2.0")', schema.meta.schemaVersion);
+                    schemaFail('meta.schemaVersion', 'semver string (e.g. "1.2.1")', schema.meta.schemaVersion);
                 }
             });
             p1unit(() => {
@@ -4349,7 +4349,7 @@
         return refs;
     }
 
-    const BUILDER_DEFAULT_SEED = { meta: { schemaVersion: '1.2.0', name: '' }, columns: {} };
+    const BUILDER_DEFAULT_SEED = { meta: { schemaVersion: '1.2.1', name: '' }, columns: {} };
 
     function createConfigBuilder(seed) {
         if (seed !== undefined && seed !== null && !isObj(seed)) {
@@ -5485,12 +5485,18 @@
         }
 
         const hasStringP = participants.some((p) => isStr(p));
+        const hasNonStringP = participants.some((p) => !isStr(p));
         const finish = (type, interpreted, extra) => {
             col.type = type;
             col.interpreted = interpreted;
             const keys = new Set(interpreted.map(interpKeyOf));
             col.distinctCount = keys.size;
-            col.relied = ['bool', 'int', 'float', 'datetime', 'date', 'time'].includes(type) && hasStringP;
+            // §C.4 strictType derivation (fixed in 1.2.1): interpretation runs BOTH ways —
+            // string participants read as a typed value, and non-string participants in a
+            // string column read via canonical conversion (Core §5.4 grants either only
+            // under strictType: false; the self-accepting invariant of §C.1 depends on this)
+            col.relied = (['bool', 'int', 'float', 'datetime', 'date', 'time'].includes(type) && hasStringP)
+                || (type === 'string' && hasNonStringP);
             Object.assign(col, extra || {});
             return col;
         };
@@ -5705,7 +5711,9 @@
         const extra = {};
         if (!(kinds.size === 1 && kinds.has('string'))) {
             extra.confidence = 'fallback';
-            extra.reasons = kinds.size > 1 || kinds.has('object') ? ['mixedNativeKinds'] : [];
+            // single non-string kind (e.g. native numbers incl. NaN): nonStringParticipants
+            // (§C.4, 1.2.1 — previously an empty reasons array)
+            extra.reasons = kinds.size > 1 || kinds.has('object') ? ['mixedNativeKinds'] : ['nonStringParticipants'];
         }
         return finish('string', participants.map((p) => (isStr(p) ? p : canonical(p))), extra);
     }
@@ -5832,7 +5840,7 @@
         const nullEquivalents = [''].concat(INFER_NULL_TOKENS.filter((t) => adoptedUnion.has(t)));
         const draft = {
             meta: {
-                schemaVersion: '1.2.0',
+                schemaVersion: '1.2.1',
                 name,
                 description: 'Draft inferred from sample data; review before use.',
             },

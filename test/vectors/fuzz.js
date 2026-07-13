@@ -127,10 +127,10 @@
     // ---------------- 3. inference: always Phase-1-valid drafts, run-to-run deterministic ----------------
 
     U.push({
-        suite, name: 'inference: random tables always yield Phase-1-valid, deterministic drafts',
+        suite, name: 'inference: random tables always yield Phase-1-valid, self-accepting, deterministic drafts',
         fn: ({ assert }) => {
             const CELLS = ['x', '1', '2.5', '1,5', 'true', 'no', 'NA', '', null, 7, 2.25, true, false,
-                'AB-1', '2026-07-01', '01.07.2026', '12:30', '👍', '  pad ', '-', 'NULL', '1e5', '0'];
+                'AB-1', '2026-07-01', '01.07.2026', '12:30', '👍', '  pad ', '-', 'NULL', '1e5', '0', NaN];
             for (let seed = 1; seed <= 25; seed++) {
                 const rnd = prng(seed * 65537);
                 const cols = 1 + Math.floor(rnd() * 6);
@@ -151,6 +151,13 @@
                 assert(deepEq(r1, r2), `seed ${seed}: inference not deterministic`);
                 const a = TV().createConfigBuilder(r1.draft).validate();
                 assert(a.valid, `seed ${seed}: draft violates Phase 1 (rule N1): ${JSON.stringify(a.errors)}`);
+                // §C.1 self-accepting invariant (named in 1.2.1): the sample covers the whole
+                // table here, so the draft MUST validate it with zero errors — this is the
+                // property whose absence let the strictType derivation bug ship
+                const run = TV().validate(r1.draft, table);
+                assert(run.valid && !run.aborted,
+                    `seed ${seed}: draft does not validate its own sample (self-accepting invariant): ` +
+                    JSON.stringify((run.summary.details || []).slice(0, 5)));
             }
         },
     });
