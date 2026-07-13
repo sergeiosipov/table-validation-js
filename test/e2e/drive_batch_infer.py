@@ -81,7 +81,8 @@ with sync_playwright() as p:
     print(f"[{browser_name}] files mode: 2 inferred, 1 failed, 1 skipped; ZIP verified "
           f"({len(names)} entries, manifest complete)")
 
-    # ---- the combined XLSX: one sheet per inferred file, inferred metadata above the data
+    # ---- the combined XLSX: Summary sheet first (flat metadata + top-freq values),
+    # then one sheet per inferred file with the metadata block above the data
     with page.expect_download() as dl:
         page.click("#xlsx")
     xpath = tmp / "workbook.xlsx"
@@ -89,12 +90,27 @@ with sync_playwright() as p:
     x = zipfile.ZipFile(xpath)
     wbxml = x.read("xl/workbook.xml").decode("utf-8")
     assert 'name="clean"' in wbxml and 'name="records"' in wbxml, f"sheets missing: {wbxml[:300]}"
-    assert wbxml.count("<sheet ") == 2, "exactly one sheet per inferred file"
+    assert wbxml.count("<sheet ") == 3, "Summary + one sheet per inferred file"
+    assert wbxml.index('name="Summary"') < wbxml.index('name="clean"'), "Summary must be the FIRST sheet"
     shared = x.read("xl/sharedStrings.xml").decode("utf-8")
     for needle in ("inferred type", "format", "precision", "nullable", "confidence",
-                   "candidate key", "alternatives", "date", "float", "yyyy-MM-dd", "North"):
-        assert needle in shared, f"combined XLSX lacks '{needle}' (metadata block or data rows missing)"
-    print(f"[{browser_name}] combined XLSX: 2 sheets, metadata block + data present")
+                   "candidate key", "alternatives", "date", "float", "yyyy-MM-dd", "North",
+                   "top_freq_val_1", "top_freq_val_10"):
+        assert needle in shared, f"combined XLSX lacks '{needle}' (metadata block, Summary, or data rows missing)"
+    # Summary (first worksheet part): header autofilter over all 21 columns, freeze pane
+    # below the header and before the top_freq_val_* columns, no wrapped cells, fitted widths
+    sm = x.read("xl/worksheets/sheet1.xml").decode("utf-8")
+    assert '<autoFilter ref="A1:U1"' in sm, "Summary autofilter missing/misplaced"
+    assert 'xSplit="11"' in sm and 'ySplit="1"' in sm, "Summary freeze pane must sit after the metadata columns and below the header"
+    assert 'wrapText="1"' not in sm, "Summary cells must not wrap"
+    assert "<cols>" in sm, "Summary columns must carry fitted widths"
+    # per-file sheets: data-header autofilter + the type/nullable review dropdowns
+    pf = x.read("xl/worksheets/sheet2.xml").decode("utf-8")
+    assert "<autoFilter " in pf, "per-file data header autofilter missing"
+    assert 'type="list"' in pf and "string,int,float,bool" in pf and "true,false" in pf, \
+        "type/nullable dropdown validations missing"
+    print(f"[{browser_name}] combined XLSX: Summary-first (autofilter, freeze L2, top-freq columns) "
+          f"+ 2 file sheets with dropdowns verified")
 
     # ---- folder pick over docs/examples: recursion + relative paths + honest failure
     # (orders-config.json is a JSON *object*, not a table — it must fail, not vanish)

@@ -86,14 +86,17 @@
         <div class="card-title">3 · Infer</div>
         <button id="run" class="primary" disabled>Infer all</button>
         <button id="zip" disabled>Download all as ZIP</button>
-        <button id="xlsx" disabled title="One workbook: a sheet per inferred file, the inferred column metadata (type, format, precision, nullable, confidence, evidence) above the table data">Download combined XLSX</button>
+        <button id="xlsx" disabled title="One workbook: a Summary sheet aggregating every file's column metadata (one row per column, top-10 frequent values as text), then a sheet per inferred file with the metadata above the table data">Download combined XLSX</button>
         <span id="progress" class="hint"></span>
         <div class="hint">The ZIP carries one <code>&lt;file&gt;.config.json</code> per success (engine-consumable,
             exactly what the console would export), optional <code>&lt;file&gt;.report.json</code> evidence,
             and a <code>manifest.json</code> naming every input with its outcome — failures included.
-            The combined XLSX is the human review copy: one sheet per inferred file, each column
-            annotated above the data with its inferred type, format, precision, nullability,
-            confidence and sample evidence — the full ingested data below.</div>
+            The combined XLSX is the human review copy: a <b>Summary</b> sheet first — every file's
+            column metadata (type, format, precision, nullable, confidence, evidence, alternatives)
+            flattened to one filterable row per column, with each column's top-10 most frequent
+            values as text on the right — then one sheet per inferred file, each column annotated
+            above the data with the same metadata (type and nullable as dropdowns), the full
+            ingested data below with an autofilter.</div>
         <table class="grid" id="results" hidden>
             <thead><tr><th>file</th><th>status</th><th>table</th><th>columns</th><th></th></tr></thead>
             <tbody id="rows"></tbody>
@@ -280,31 +283,111 @@
         }).join(', ');
     }
 
+    // one flat metadata record per column — shared by the Summary sheet and each
+    // per-file metadata block, so the two can never drift
+    const XLSX_TOPN = 10;
+    function colRecordsFor(e) {
+        return e.report.columns.map((c, ci) => {
+            const d = e.draft.columns[c.name];
+            // top-N values by frequency over the FULL ingested column, as text;
+            // ties keep first-seen order (Array.prototype.sort is stable)
+            const counts = new Map();
+            for (const row of e.tableData.rows) {
+                const v = row[ci];
+                if (v === null || v === undefined) continue;
+                const s = String(v);
+                counts.set(s, (counts.get(s) || 0) + 1);
+            }
+            const topFreq = Array.from(counts.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, XLSX_TOPN)
+                .map(([s]) => (s.length > 80 ? s.slice(0, 79) + '…' : s));
+            return {
+                column: c.name,
+                type: c.inferredType,
+                format: fmtOf(d),
+                precision: d.type.precision
+                    ? (d.type.precision.min === d.type.precision.max ? String(d.type.precision.min) : `${d.type.precision.min}–${d.type.precision.max}`)
+                    : '',
+                nullable: String(d.nullable),
+                confidence: c.confidence,
+                nulls: c.observed.nulls,
+                distinct: c.observed.distinctCount,
+                key: c.candidateKey ? '●' : '',
+                alternatives: c.alternatives
+                    .map((a) => a.type + (a.formats ? ' ' + a.formats.join('|') : '')).join(', '),
+                topFreq,
+            };
+        });
+    }
+
     async function makeXlsx() {
         const wb = new ExcelJS.Workbook();
-        const usedNames = new Set();
-        for (const e of entries) {
-            if (e.status !== 'ok' || !e.tableData) continue;
-            const ws = wb.addWorksheet(sheetNameFor(e.relPath, usedNames));
+        const usedNames = new Set(['summary']);          // reserve the Summary sheet name
+        const records = entries
+            .filter((e) => e.status === 'ok' && e.tableData)
+            .map((e) => ({ e, sheetName: sheetNameFor(e.relPath, usedNames), colRecs: colRecordsFor(e) }));
+
+        // ---- Summary sheet, FIRST in the workbook: the per-sheet metadata blocks
+        // flattened to one row per (sheet, column) for cross-file review, with the
+        // top-10 most frequent values of each column as text on the right
+        const SUM_META = ['sheet', 'column', 'inferred type', 'format', 'precision',
+            'nullable', 'confidence', 'nulls (sample)', 'distinct (sample)', 'candidate key', 'alternatives'];
+        const sum = wb.addWorksheet('Summary');
+        const sumHeader = sum.addRow([...SUM_META,
+            ...Array.from({ length: XLSX_TOPN }, (_, i) => `top_freq_val_${i + 1}`)]);
+        sumHeader.font = { bold: true };
+        for (let ci = 1; ci <= SUM_META.length + XLSX_TOPN; ci++) {
+            sumHeader.getCell(ci).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAEEF2' } };
+        }
+        for (const r of records) {
+            for (const cr of r.colRecs) {
+                const row = sum.addRow([r.sheetName, cr.column, cr.type, cr.format, cr.precision,
+                    cr.nullable, cr.confidence, cr.nulls, cr.distinct, cr.key, cr.alternatives, ...cr.topFreq]);
+                row.getCell(SUM_META.indexOf('confidence') + 1).fill =
+                    { type: 'pattern', pattern: 'solid', fgColor: { argb: CONF_FILL[cr.confidence] || CONF_FILL.fallback } };
+            }
+        }
+        sum.eachRow((row) => row.eachCell({ includeEmpty: false }, (cell) => {
+            cell.alignment = { wrapText: false, vertical: 'top' };
+        }));
+        sum.autoFilter = {
+            from: { row: 1, column: 1 },
+            to: { row: 1, column: SUM_META.length + XLSX_TOPN },
+        };
+        // freeze below the header and before the example-value columns
+        sum.views = [{ state: 'frozen', xSplit: SUM_META.length, ySplit: 1 }];
+        {
+            const measure = (v) => (v === null || v === undefined ? 0 : String(v).length);
+            for (let ci = 0; ci < SUM_META.length + XLSX_TOPN; ci++) {
+                let w = measure(ci < SUM_META.length ? SUM_META[ci] : `top_freq_val_${ci - SUM_META.length + 1}`);
+                for (const r of records) {
+                    for (const cr of r.colRecs) {
+                        const flat = [r.sheetName, cr.column, cr.type, cr.format, cr.precision,
+                            cr.nullable, cr.confidence, cr.nulls, cr.distinct, cr.key, cr.alternatives, ...cr.topFreq];
+                        w = Math.max(w, measure(flat[ci]));
+                    }
+                }
+                sum.getColumn(ci + 1).width = Math.min(Math.max(w + 2, 8), ci < SUM_META.length ? 40 : 28);
+            }
+        }
+
+        for (const { e, sheetName, colRecs } of records) {
+            const ws = wb.addWorksheet(sheetName);
             const cols = e.report.columns;                     // table column order (§C.7)
-            const defs = e.draft.columns;
-            const per = (fn) => cols.map((c) => fn(c, defs[c.name]));
 
             ws.addRow(['file', `${e.relPath} — ${e.table.rows} rows × ${e.table.cols} cols · sampled ${e.report.sample.rowsSampled} of ${e.report.sample.rowsAvailable} rows · engine v${TV().VERSION}`]);
             const meta = [
-                ['column', per((c) => c.name)],
-                ['inferred type', per((c) => c.inferredType)],
-                ['format', per((c, d) => fmtOf(d))],
-                ['precision', per((c, d) => d.type.precision
-                    ? (d.type.precision.min === d.type.precision.max ? String(d.type.precision.min) : `${d.type.precision.min}–${d.type.precision.max}`)
-                    : '')],
-                ['nullable', per((c, d) => String(d.nullable))],
-                ['confidence', per((c) => c.confidence)],
-                ['nulls (sample)', per((c) => c.observed.nulls)],
-                ['distinct (sample)', per((c) => c.observed.distinctCount)],
-                ['candidate key', per((c) => (c.candidateKey ? '●' : ''))],
-                ['alternatives', per((c) => c.alternatives
-                    .map((a) => a.type + (a.formats ? ' ' + a.formats.join('|') : '')).join(', '))],
+                ['column', colRecs.map((x) => x.column)],
+                ['inferred type', colRecs.map((x) => x.type)],
+                ['format', colRecs.map((x) => x.format)],
+                ['precision', colRecs.map((x) => x.precision)],
+                ['nullable', colRecs.map((x) => x.nullable)],
+                ['confidence', colRecs.map((x) => x.confidence)],
+                ['nulls (sample)', colRecs.map((x) => x.nulls)],
+                ['distinct (sample)', colRecs.map((x) => x.distinct)],
+                ['candidate key', colRecs.map((x) => x.key)],
+                ['alternatives', colRecs.map((x) => x.alternatives)],
             ];
             for (const [label, values] of meta) ws.addRow([label, ...values]);
             ws.addRow([]);
