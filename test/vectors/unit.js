@@ -7,10 +7,22 @@
     const SIMPLE = () => ({ meta: META, columns: { a: { type: { name: 'string' } } } });
 
     U('constants — VERSION, SPEC_VERSION, result.specVersion', (t) => {
-        t.assertEq(TV().VERSION, '1.3.1', 'VERSION');
-        t.assertEq(TV().SPEC_VERSION, '1.3.1', 'SPEC_VERSION');
+        // pinned RELATIONALLY (VERSION === SPEC_VERSION === result.specVersion);
+        // release-check owns the one literal claim, in README
+        t.assertEq(TV().VERSION, TV().SPEC_VERSION, 'VERSION === SPEC_VERSION');
+        t.assert(/^\d+\.\d+\.\d+$/.test(TV().VERSION), 'VERSION is semver');
         const r = TV().validate(SIMPLE(), { headers: ['a'], rows: [] });
-        t.assertEq(r.specVersion, '1.3.1', 'result.specVersion');
+        t.assertEq(r.specVersion, TV().SPEC_VERSION, 'result.specVersion');
+    });
+    U('drafts and builder seed stamp the CURRENT spec version (1.3.2)', (t) => {
+        // v1.3.1 shipped drafts stamping a stale '1.3.0' — pin both stamps to the
+        // constant so a missed bump can never ship silently again. The ONE literal
+        // release pin of the suite lives here (release-check enforces its presence):
+        t.assertEq(TV().SPEC_VERSION, '1.3.2', 'release literal');
+        const seed = TV().createConfigBuilder().build();
+        t.assertEq(seed.meta.schemaVersion, TV().SPEC_VERSION, 'builder default seed schemaVersion');
+        const inf = TV().inferConfig({ headers: ['a'], rows: [['1'], ['2'], ['3']] });
+        t.assertEq(inf.draft.meta.schemaVersion, TV().SPEC_VERSION, 'inferred draft schemaVersion');
     });
 
     U('config errors — thrown only for caller mistakes, never for schema content', (t) => {

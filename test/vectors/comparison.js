@@ -24,7 +24,7 @@
         const schema = baseSchema({ match: { keys: ['id'] } });
         const r = TV().compare(schema, T([['1', 'a', '1.0']]), T([['1', 'a', '1.0']]));
         t.assertEq(r.engine, 'compare', 'engine tag');
-        t.assertEq(r.specVersion, '1.3.1', 'specVersion');
+        t.assertEq(r.specVersion, TV().SPEC_VERSION, 'specVersion');
         t.assert(!!r.diff && Array.isArray(r.diff.rows), 'diff.rows present');
         t.assertEq(r.aborted, false, 'not aborted');
         t.assertEq(r.summary.rowsChecked, 1, 'rowsChecked = |diff.rows|');
