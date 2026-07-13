@@ -11,8 +11,8 @@ contracts (Core Specification, Authoring/Ingestion/Inference Addendum, Design-De
 Log) live in the companion spec repository
 [`table-validation-spec`](https://github.com/sergeiosipov/table-validation-spec)
 (private; see [Specs](#specs)). The JS-specific documents — the
-[Browser JS profile](table-validation-js-impl-spec-v1.3.0.md) and the
-[console UI architecture](table-validation-ui-architecture-v1.3.0.md) — live in this
+[Browser JS profile](table-validation-js-impl-spec-v1.3.1.md) and the
+[console UI architecture](table-validation-ui-architecture-v1.3.1.md) — live in this
 repository.
 
 [`dist/table-validation.js`](dist/table-validation.js) implements **Core Spec 1.3.0** in full
@@ -58,7 +58,7 @@ to `cdn.jsdelivr.net`, and nothing else — no npm, no node, no Python:
 two single-file variants pull everything else from the pinned CDN tag:
 
 - [`console-standalone.html`](console-standalone.html) — the entire console in one file;
-  the engine and console scripts load from `…@v1.3.0` on jsDelivr, each with a sha384
+  the engine and console scripts load from `…@v1.3.1` on jsDelivr, each with a sha384
   `integrity` attribute, so a tampered CDN response is refused by the browser. Engines
   run on the main thread (a single file has no sibling worker script).
 - [`docs/user-guide-standalone.html`](docs/user-guide-standalone.html) — the guide in one
@@ -96,8 +96,8 @@ Dependencies are read from `globalThis` at call time only, so ordering relative 
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js"></script>       <!-- exportXlsx only -->
 <script src="dist/table-validation.js"></script>
 <!-- or pinned from the CDN with integrity checking (see "CDN & SRI" below):
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.0/dist/table-validation.js"
-        integrity="sha384-YuYEveCuOUtUbIbJ37sXFaDt5CW0HkDWo4rQ8oVhFogxWFo/SJsuky86/5UhIsx2" crossorigin="anonymous"></script> -->
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.1/dist/table-validation.js"
+        integrity="sha384-dpBQTv5JJwb9sYAFI+ypp/fqKBrcVtwPmv3mRgBaVCfRyK1POem2OjC324d+kXi9" crossorigin="anonymous"></script> -->
 ```
 
 ## CDN & SRI (v1.3.0)
@@ -106,9 +106,9 @@ Tags are immutable — pin the exact version and verify it:
 
 | Artifact | jsDelivr URL | `integrity` (sha384) |
 |---|---|---|
-| engine | `https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.0/dist/table-validation.js` | `sha384-YuYEveCuOUtUbIbJ37sXFaDt5CW0HkDWo4rQ8oVhFogxWFo/SJsuky86/5UhIsx2` |
-| worker wrapper | `https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.0/dist/table-validation-worker.js` | `sha384-cjB8SYyBz8hNlRJ8yDWarB26GuU9Ga9qSjF3vjVK4YRNDcROW6ZsqXuuso+eaae4` |
-| TypeScript declarations | `https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.0/dist/table-validation.d.ts` | — (not `<script>`-loaded) |
+| engine | `https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.1/dist/table-validation.js` | `sha384-dpBQTv5JJwb9sYAFI+ypp/fqKBrcVtwPmv3mRgBaVCfRyK1POem2OjC324d+kXi9` |
+| worker wrapper | `https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.1/dist/table-validation-worker.js` | `sha384-Wsy3MrdLkR6US1HHtF8Ybd/Afz3+D8Uei3+6pa1h82aepwhUP5me064nIOUaF5br` |
+| TypeScript declarations | `https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.1/dist/table-validation.d.ts` | — (not `<script>`-loaded) |
 
 `node test/release-check.js` recomputes these hashes; any post-tag fix ships as a new
 patch tag (never re-tag changed content — CDNs cache exact-version URLs permanently).
@@ -225,7 +225,7 @@ normalization, §C for inference):
 ## The console
 
 [`console.html`](console.html) is the **Authoring & Run Console** — the HTML interface
-implementing the [UI architecture spec](table-validation-ui-architecture-v1.3.0.md) on top of the
+implementing the [UI architecture spec](table-validation-ui-architecture-v1.3.1.md) on top of the
 engine and the tooling modules. Open it in any browser (`file://` works; Luxon/ExcelJS load
 from CDN). New to it? Start with the **[user guide](docs/user-guide.md)** — task-oriented,
 screenshot-verified, with worked examples in [`docs/examples/`](docs/examples/orders-raw.csv);
@@ -335,15 +335,15 @@ The specification set shares the unified version **1.3.0**, and
 
 **In this repository (JS-specific):**
 
-- [Browser JS Implementation Specification v1.3.0](table-validation-js-impl-spec-v1.3.0.md) — API, bindings, packaging, incl. `configModel`/`createConfigBuilder`, `ingest`, `inferConfig` (§3.11–§3.13)
-- [Authoring & Run Console — UI Architecture v1.3.0](table-validation-ui-architecture-v1.3.0.md) — the user-facing tool tying authoring/ingestion/inference to the engines; §11 is the normative **full-surface coverage matrix** — every public API capability mapped to a UI affordance, all-local static files, deps CDN-only
+- [Browser JS Implementation Specification v1.3.1](table-validation-js-impl-spec-v1.3.1.md) — API, bindings, packaging, incl. `configModel`/`createConfigBuilder`, `ingest`, `inferConfig` (§3.11–§3.13)
+- [Authoring & Run Console — UI Architecture v1.3.1](table-validation-ui-architecture-v1.3.1.md) — the user-facing tool tying authoring/ingestion/inference to the engines; §11 is the normative **full-surface coverage matrix** — every public API capability mapped to a UI affordance, all-local static files, deps CDN-only
 - [Benchmarks](docs/benchmarks.md) — measured `validate()`/`compare()` performance at 10⁴–10⁷ cells in Node and Chromium, scale guidance, and how to rerun the harness (browser, zero toolchain)
 
 **In the companion spec repository** (language-agnostic, source of truth —
 [`table-validation-spec`](https://github.com/sergeiosipov/table-validation-spec), currently
 private, so these links require access):
 
-- [Core Specification v1.3.0](https://github.com/sergeiosipov/table-validation-spec/blob/v1.3.0/table-validation-core-spec-v1.3.0.md) — behavior (normative), incl. the comparison engine (§15) and the §16 anchor for the addendum
+- [Core Specification v1.3.1](https://github.com/sergeiosipov/table-validation-spec/blob/v1.3.1/table-validation-core-spec-v1.3.1.md) — behavior (normative), incl. the comparison engine (§15) and the §16 anchor for the addendum
 - [Authoring, Ingestion & Inference Addendum v1.3.0](https://github.com/sergeiosipov/table-validation-spec/blob/v1.3.0/table-validation-authoring-tooling-addendum-v1.3.0.md) — normative core companion: config meta-model & builder (§A), `ingest()` + normalization pipeline (§B), `inferConfig()` (§C)
 - [Design-Decisions Log](https://github.com/sergeiosipov/table-validation-spec/blob/v1.3.0/table-validation-design-decisions-v1.3.0.md) — non-normative record of every resolved ambiguity, with the genuine forks flagged
 
