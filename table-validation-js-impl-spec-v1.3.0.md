@@ -124,7 +124,7 @@ result.abortReason   // string | null — enum below when aborted, else null
   - `validate()`: `"schemaInvalid"`, `"headersMissing"`, `"duplicateColumnName"`, `"customFunctionError"`, `"customFunctionContractViolation"`.
   - `compare()`: `"schemaInvalid"`, `"customFunctionError"`, `"customFunctionContractViolation"`, `"duplicateMatchKey"`, `"maxCandidatePairsExceeded"`.
 - **Fail-fast (policy, tunable):** the engine *could* continue but the caller/schema asked to stop after a failure. Expressed by either:
-  - column-level **`columns.<name>.stopOnFail: true`** (there is no per-check variant) — if any violation occurs for that column, abort with `abortReason: "stopOnFail:<column>"` (severity stays `error`; the *stop* is the separate flag); or
+  - column-level **`columns.<name>.stopOnFail: true`** (there is no per-check variant) — if any violation occurs for that column, abort with `abortReason: "stopOnFail:<column>"` (the violation keeps its governing severity — a `warning`-severity violation can trigger the stop, leaving `valid: true` with `aborted: true`; the *stop* is the separate flag); or
   - global **`resultConfig.stopPolicy: "never" (default) | "firstError"`** — `"firstError"` aborts on the first `error`-severity violation with `abortReason: "stopPolicy"` (Core Spec §2.2 is the canonical abort-reason list).
 - The volume-based circuit breakers (`maxErrors`/`maxErrorsPerColumn`) remain a *separate* termination member and keep reporting through `truncated`/`truncationReason`; `aborted`/`abortReason` are for correctness-based stops.
 

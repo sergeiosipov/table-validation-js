@@ -70,7 +70,7 @@ Every vector also runs through the purity harness (inputs deep-frozen) and the d
 | Unknown-path rejection (M8); seed immutability; column ops; `intendedUse`; `setComparison(null)` | [vectors/authoring.js](vectors/authoring.js) |
 | CSV/TSV grammar (RFC 4180 quoting, mixed separators, blank lines, ragged rows), header modes | [vectors/ingest.js](vectors/ingest.js) |
 | Encoding chain (BOM sniff, strict UTF-8, windows-1252 fallback + warning; explicit `encodingUnsupported`/`decodingFailed`) | [vectors/ingest.js](vectors/ingest.js) |
-| IngestSpec rules I1–I12 (all violations collected, §9.2-shaped detail), inert-setting advisories | [vectors/ingest.js](vectors/ingest.js) |
+| IngestSpec rules I1–I13 (all violations collected, §9.2-shaped detail), inert-setting advisories | [vectors/ingest.js](vectors/ingest.js) |
 | Limits fail fast (`limitExceeded:*`), `formatMismatch` | [vectors/ingest.js](vectors/ingest.js) |
 | Normalization built-ins (§B.8): trim, caseFold, nullCoerce, reformatNumber, reformatTemporal, promoteNumber, promoteBool, stripAffix, replaceChars, fillDown (ordering, ragged rows) | [vectors/ingest.js](vectors/ingest.js) |
 | Normalization ordering (table steps → column steps), headers never normalized, `normalizationActions` counts/order, absent unless a pipeline ran | [vectors/ingest.js](vectors/ingest.js) |
