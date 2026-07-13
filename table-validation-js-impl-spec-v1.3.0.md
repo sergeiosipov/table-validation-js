@@ -121,10 +121,10 @@ result.abortReason   // string | null — enum below when aborted, else null
 ```
 
 - **Abort (intrinsic, not tunable):** the engine cannot meaningfully continue. It records ≥1 `error` **and** sets `aborted:true`, so an abort always implies `valid:false`. Reasons:
-  - `validate()`: `"schemaInvalid"`, `"headersMissing"`, `"customFunctionError"`, `"customFunctionContractViolation"`.
-  - `compare()`: the same set **plus** `"duplicateMatchKey"`.
+  - `validate()`: `"schemaInvalid"`, `"headersMissing"`, `"duplicateColumnName"`, `"customFunctionError"`, `"customFunctionContractViolation"`.
+  - `compare()`: `"schemaInvalid"`, `"customFunctionError"`, `"customFunctionContractViolation"`, `"duplicateMatchKey"`, `"maxCandidatePairsExceeded"`.
 - **Fail-fast (policy, tunable):** the engine *could* continue but the caller/schema asked to stop after a failure. Expressed by either:
-  - per-column or per-check **`stopOnFail: true`** — if that rule fails, abort with `abortReason: "stopOnFail:<ruleName>"` (severity stays `error`; the *stop* is the separate flag); or
+  - column-level **`columns.<name>.stopOnFail: true`** (there is no per-check variant) — if any violation occurs for that column, abort with `abortReason: "stopOnFail:<column>"` (the violation keeps its governing severity — a `warning`-severity violation can trigger the stop, leaving `valid: true` with `aborted: true`; the *stop* is the separate flag); or
   - global **`resultConfig.stopPolicy: "never" (default) | "firstError"`** — `"firstError"` aborts on the first `error`-severity violation with `abortReason: "stopPolicy"` (Core Spec §2.2 is the canonical abort-reason list).
 - The volume-based circuit breakers (`maxErrors`/`maxErrorsPerColumn`) remain a *separate* termination member and keep reporting through `truncated`/`truncationReason`; `aborted`/`abortReason` are for correctness-based stops.
 
@@ -363,7 +363,7 @@ b.build()             // AUTHORED (sparse) schema JSON — defaults NOT baked in
 b.resolvedPreview()   // fully-resolved view (defaults + overrides applied) — inspection only
 ```
 
-- **Same rules as the engines** (rule M6): `validate()` applies Core Spec §10 rules 1–57 (plus §15.12 C1–C9 when a `comparison` section is present) and the §8.2 advisory detection, so a builder-clean config never aborts with `abortReason: "schemaInvalid"` at run time.
+- **Same rules as the engines** (rule M6): `validate()` applies Core Spec §10 rules 1–58 (plus §15.12 C1–C9 when a `comparison` section is present) and the §8.2 advisory detection, so a builder-clean config never aborts with `abortReason: "schemaInvalid"` at run time.
 - **Exhaustive errors** (Addendum §A.4 requirement 7): `errors` carries **every independent Phase-1 defect in one pass** — the internal Phase-1 checker runs in accumulate mode for the builder while the engines keep their abort-on-first fast path. `errors[0]` is the violation an engine would abort with; fixing defects one at a time strictly shrinks the list.
 - **Deferred rules, concretely:** rule 30 (custom-function existence) is checked against `options.functions` when supplied, else reported in `deferred` as `"10:30"` (comparison tolerance/diff-check functions likewise defer as `"C5"`/`"C8"`). Rule 4 (IANA-zone validity) is **always checkable in this profile** — via `luxon.IANAZone.isValidZone` when the Luxon global is present, and via the platform `Intl` zone database otherwise — so it never appears in `deferred` here; the deferral mechanism remains defined for profiles without any zone database. Deferred rules are never silently passed.
 - `validate(options)` accepts `{ functions?, intendedUse? }`; `intendedUse` defaults per Addendum §A.6 (`"both"` when a `comparison` section is present, else `"validate"`).
@@ -451,7 +451,7 @@ w.onmessage = (ev) => { /* ev.data = { id: 1, ok: true, result } */ };
 | `ingest` | `[source, ingestSpec, options?]` | `IngestResult` (`Blob`/`ArrayBuffer` sources are structured-clone-able) |
 | `inferConfig` | `[table, options?]` | `InferenceResult` |
 
-**Structured-clone safety.** Results are sanitized before posting: any non-plain object — in practice the Luxon `DateTime` instances carried as interpreted temporal values in `cellObservations` and diff cells — is rendered to its ISO string (`.toISO()`), everything else passes through unchanged. Results are otherwise identical to the main-thread engines.
+**Structured-clone safety.** Results are sanitized before posting: any non-plain object — e.g. a Luxon `DateTime` carried as an interpreted value in `cellObservations` or diff cells — is rendered to its ISO string (via `.toISO()`) or a `String(...)` fallback for other non-plain objects; plain data passes through unchanged. Results are byte-identical to the main-thread engines except for those interpreted temporal objects.
 
 **Limitation (by design).** Function registries (`options.functions`, `options.normalizationFunctions`) cannot cross the boundary — functions are not structured-clone-able. Configs that need host functions run on the thread that owns the registry; the worker rejects them exactly as an engine without the registry would (Phase-1 rule 30).
 
@@ -509,7 +509,7 @@ const INT_RE   = /^[+-]?[0-9]+$/;
 const FLOAT_RE = /^[+-]?[0-9]+(\.[0-9]+)?$/;
 ```
 
-- NumberFormat interpretation follows the 6-step algorithm of Core Spec §3.5 on a working copy; the cell string itself is untouched.
+- NumberFormat interpretation follows the 7-step algorithm of Core Spec §3.5 on a working copy; the cell string itself is untouched.
 - Int safe-range check: `Number.isSafeInteger(v)` (matches Core Spec §1.5's 2^53 − 1 bound).
 - Canonical string conversion (Core Spec §1.5): `String(value)` — ECMAScript Number-to-String is the shortest round-tripping decimal, satisfying the requirement. Booleans → `"true"`/`"false"`.
 - Boolean acceptance: `matchStrategy` applied to both the cell and each `trueValues`/`falseValues` entry, then string equality; strategy steps per Core Spec §3.2 (trim → stripSpaces → `toLowerCase()`).
@@ -542,7 +542,7 @@ The `comparison.match.fuzzy.metric` selector (§3.3) binds to a string-similarit
 | `levenshtein` | `1 − editDistance / max(\|a\|,\|b\|)` (code-point edit distance) | plain character edit distance |
 
 - Determinism: fuzzy key pairing is greedy and deterministic — produced rows in schema order claim the best remaining candidate; ties break to the lowest expected index. A runner-up within `ambiguityMargin` of the winner additionally raises `ambiguousFuzzyMatch`.
-- `maxCandidatePairs` guards the pairing cost; exceeding it is a config error surfaced as `schemaInvalid` (abort), not a silent truncation.
+- `maxCandidatePairs` guards the pairing cost; exceeding it is a runtime data-volume abort at pairing time — `abortReason: "maxCandidatePairsExceeded"` (Core Spec §15.6), not a `schemaInvalid` config error — and never a silent truncation.
 - Edit distance uses code points (`Array.from`), consistent with the §5 string-length rule; no external Unicode tables.
 
 ### 4.7 Tolerance Function Registry (comparison)

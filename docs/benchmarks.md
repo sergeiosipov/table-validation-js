@@ -2,9 +2,11 @@
 
 Measured numbers for `validate()` and `compare()` at four table sizes, in both official
 runtimes. Benchmarks are machine-dependent: treat the shape of the curve as the finding
-and the absolute milliseconds as one data point (these were measured 2026-07-12 on a
-Windows 11 x64 development machine; rerun the harness on yours — it takes minutes and
-needs no toolchain).
+and the absolute milliseconds as one data point (the Node table below was refreshed
+2026-07-13 on a Windows 11 x64 development machine at the v1.3.0 tip, superseding the
+2026-07-12 baseline; the Chromium table is still the 2026-07-12 measurement and is
+pending its own refresh — rerun the harness on yours in the meantime, it takes minutes
+and needs no toolchain).
 
 ## The workload
 
@@ -21,14 +23,17 @@ usage pattern, no warm-up flattery.
 
 ## Results
 
-**Node v24 (V8):** `node test/bench.js`
+**Node v24 (V8):** `node test/bench.js` — refreshed 2026-07-13 at the v1.3.0 tip (temporal
+column on, Luxon loaded). The numbers are flat versus the 2026-07-12 baseline — no
+regression — despite v1.3.0 adding the `luxParseFormat` regex layer and expanding
+`interpretNumberFormat` to its 7-step algorithm (§3.5).
 
 | cells | rows | validate | compare | heap Δ |
 |---|---|---|---|---|
-| 10⁴ | 1 000 | 58 ms | 53 ms | 3.6 MB |
-| 10⁵ | 10 000 | 157 ms | 289 ms | 15.5 MB |
-| 10⁶ | 100 000 | 1.29 s | 2.74 s | 146 MB |
-| 10⁷ | 1 000 000 | 13.2 s | 28.6 s | 1.40 GB |
+| 10⁴ | 1 000 | 67 ms | 46 ms | 3.3 MB |
+| 10⁵ | 10 000 | 155 ms | 270 ms | 15.9 MB |
+| 10⁶ | 100 000 | 1.21 s | 2.59 s | 146.0 MB |
+| 10⁷ | 1 000 000 | 13.4 s | 27.7 s | 1.41 GB |
 
 **Headless Chromium (same machine):** `test/bench.html`
 
