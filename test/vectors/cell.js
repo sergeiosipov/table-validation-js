@@ -361,4 +361,92 @@
         },
     });
 
+    // ---------------- v1.3.1: pattern × allowBareDecimal, pattern × negativeStyle ----------------
+
+    V({
+        name: 'pattern (1.3.1): grouped all-# integer part admits bare decimals under allowBareDecimal',
+        schema: {
+            meta: { schemaVersion: '1.3.1', name: 't' }, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                a: {
+                    type: {
+                        name: 'float',
+                        formats: [{ decimalSeparator: '.', groupingSeparators: [','], allowBareDecimal: true, pattern: '#,###.00' }],
+                    },
+                },
+            },
+        },
+        table: { headers: ['a'], rows: [['.85'], ['1,234.50'], ['234.50'], ['12.5']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 3, ruleName: 'typeMismatch' }],   // pattern demands exactly 2 decimals;
+            // '.85' passes since 1.3.1 (all-# integer part → integer digits optional)
+        },
+    });
+
+    V({
+        name: 'pattern (1.3.1): without allowBareDecimal the base grammar still gates ".85"',
+        schema: {
+            meta: { schemaVersion: '1.3.1', name: 't' }, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                a: {
+                    type: {
+                        name: 'float',
+                        formats: [{ decimalSeparator: '.', groupingSeparators: [','], pattern: '#,###.00' }],
+                    },
+                },
+            },
+        },
+        table: { headers: ['a'], rows: [['.85']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 0, ruleName: 'typeMismatch' }],
+        },
+    });
+
+    V({
+        name: 'pattern applies to the unsigned body under leadingSign (1.3.1)',
+        schema: {
+            meta: { schemaVersion: '1.3.1', name: 't' }, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                amt: {
+                    type: {
+                        name: 'float',
+                        formats: [{ decimalSeparator: '.', groupingSeparators: [','], pattern: '#,##0.00' }],
+                    },
+                },
+            },
+        },
+        table: { headers: ['amt'], rows: [['-1,234.50'], ['+1,234.50'], ['1,234.50']] },
+        expect: { valid: true, summary: { bySeverity: { error: 0, warning: 0 } } },   // pre-1.3.1 the
+        // leading sign broke the pattern match → typeMismatch
+    });
+
+    V({
+        name: 'pattern × parentheses (1.3.1): the style owns the sign; a leading minus is no decoration',
+        schema: {
+            meta: { schemaVersion: '1.3.1', name: 't' }, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                amt: {
+                    type: {
+                        name: 'float',
+                        formats: [{ decimalSeparator: '.', groupingSeparators: [','], negativeStyle: 'parentheses', pattern: '#,##0.00' }],
+                    },
+                },
+            },
+        },
+        table: { headers: ['amt'], rows: [['(1,234.50)'], ['-1,234.50']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 1, ruleName: 'typeMismatch' }],
+        },
+    });
+
 })();

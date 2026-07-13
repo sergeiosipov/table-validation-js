@@ -1,6 +1,6 @@
 # Table Validation Engine — Browser JS Implementation Specification
 
-## Document Version: 1.3.0
+## Document Version: 1.3.1
 
 > **Document set.** This document defines the **Browser JS profile** of the *Table Validation Library — Core Specification v1.3.0* (the "Core Spec") and of its *Authoring, Ingestion & Inference Addendum v1.3.0* (the "Addendum", Core Spec §16). All validation and comparison behavior — pipeline, rules, semantics, result structure — is defined there and is not restated here. This document binds the host capabilities of Core Spec §1.6, defines the concrete public API (validation, comparison, and the tooling modules), and specifies packaging and CDN publishing. The doc version, `TableValidation.VERSION`, `TableValidation.SPEC_VERSION`, and the `specVersion` field emitted in every result share **one unified number** (§7.3).
 
@@ -89,7 +89,7 @@ Load order (Luxon before the engine if temporal columns are used; ExcelJS any ti
 ```html
 <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js"></script> <!-- optional -->
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.0/dist/table-validation.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.1/dist/table-validation.js"></script>
 <!-- or a plain local copy: <script src="dist/table-validation.js"></script> -->
 ```
 
@@ -278,7 +278,7 @@ Renders a **`compare()`** result as a three-sheet workbook. Requires the compari
 
 - Requires the `ExcelJS` global; otherwise rejects with `TableValidationConfigError`.
 - **Three sheets:**
-  - **Comparison** — one row per matched/orphan row; leading filter columns **`Scope`** (in/out/‑, from `comparison.scope`) and **`Match Status`** (matched / fuzzy / missing / unexpected), then one column per compared field. **Cell text = the outcome:** `equal` renders the produced value; `equivalent` renders `⚠ produced ≈ expected`; `different` renders `✖ produced ≠ expected` (type tags `[t]` only when the two interpreted types differ). **Cell highlight = the final (max) severity** over everything touching that cell — its equality tier *and* any column-level diff check — so a cell can *say* "different" while its tint reflects the configured policy; `none` stays neutral.
+  - **Comparison** — one row per matched/orphan row; leading filter columns **`Scope`** (in/out/‑, from `comparison.scope`) and **`Match Status`** (matched / fuzzyMatched / missing / unexpected / excludedDuplicateKey), then one column per compared field. **Cell text = the outcome:** `equal` renders the produced value; `equivalent` renders `⚠ produced ≈ expected`; `different` renders `✖ produced ≠ expected` (type tags `[t]` only when the two interpreted types differ). **Cell highlight = the final (max) severity** over everything touching that cell — its equality tier *and* any column-level diff check — so a cell can *say* "different" while its tint reflects the configured policy; `none` stays neutral.
   - **Errors** — one row per `warning`/`error` outcome (never `none`), with filter columns **Check**, **Severity**, **Scope**, **Match Status**, plus row/column/message and a `Go To` hyperlink into the Data sheet. Sorted severity-first, autofiltered. This is where a cell touched by three checks becomes three rows (against one tinted cell on Comparison).
   - **Data** — the raw produced/expected rows the hyperlinks target.
 - Messages render via [`renderMessage`](#35-tablevalidationrendermessage) (localizable).
@@ -435,7 +435,7 @@ TableValidation.inferConfig(table, options?) → { draft, report }   // synchron
 `dist/table-validation-worker.js` is a small hand-authored **classic worker** script (CDN-fetchable from the same tag). It `importScripts('table-validation.js')` from its own directory at startup and proxies the four heavy entry points over `postMessage`.
 
 ```javascript
-const w = new Worker('https://cdn.jsdelivr.net/gh/<owner>/table-validation-js@v1.3.0/dist/table-validation-worker.js');
+const w = new Worker('https://cdn.jsdelivr.net/gh/<owner>/table-validation-js@v1.3.1/dist/table-validation-worker.js');
 w.postMessage({ id: 1, op: 'validate', args: [schema, table, { referenceInstant }] });
 w.onmessage = (ev) => { /* ev.data = { id: 1, ok: true, result } */ };
 ```
@@ -632,7 +632,7 @@ CDN publishing is possible and is the intended distribution channel. You do not 
 jsDelivr serves files straight from GitHub tags; no npm, no node, no registration:
 
 ```
-https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.0/dist/table-validation.js
+https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.1/dist/table-validation.js
 ```
 
 Release procedure (git only):
@@ -695,7 +695,7 @@ $h = [System.Security.Cryptography.SHA384]::Create().ComputeHash([IO.File]::Read
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.0/dist/table-validation.js"
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.1/dist/table-validation.js"
         integrity="sha384-<hash>" crossorigin="anonymous"></script>
 ```
 
@@ -708,7 +708,7 @@ Validate a raw CSV feed (headerless) and export the annotated workbook:
 ```html
 <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.0/dist/table-validation.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.1/dist/table-validation.js"></script>
 <script>
 const schema = {
     meta: { schemaVersion: "1.3.0", name: "deliveries" },

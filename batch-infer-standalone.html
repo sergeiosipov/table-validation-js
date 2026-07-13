@@ -6,7 +6,7 @@
     <title>Table Validation — Batch Config Inference</title>
     <!-- STANDALONE TOOL: infer a draft config for MANY files at once and save them
          all as one ZIP. Single hand-authored file — send it anywhere; the engine and
-         libraries load from CDN (the engine pinned to the immutable v1.3.0 tag with
+         libraries load from CDN (the engine pinned to the immutable v1.3.1 tag with
          subresource integrity). Files are read locally in the browser and never leave
          the machine; the only network access is cdn.jsdelivr.net.
 
@@ -111,8 +111,8 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"
         integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
         crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.0/dist/table-validation.js"
-        integrity="sha384-YuYEveCuOUtUbIbJ37sXFaDt5CW0HkDWo4rQ8oVhFogxWFo/SJsuky86/5UhIsx2"
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.3.1/dist/table-validation.js"
+        integrity="sha384-dpBQTv5JJwb9sYAFI+ypp/fqKBrcVtwPmv3mRgBaVCfRyK1POem2OjC324d+kXi9"
         crossorigin="anonymous"></script>
 <script>
 'use strict';
@@ -121,7 +121,7 @@
     const $ = (id) => document.getElementById(id);
     const FORMAT_BY_EXT = { csv: 'csv', tsv: 'tsv', txt: 'csv', xlsx: 'xlsx', json: 'json' };
 
-    // entries: { file, relPath, format, status, error, table, draft, report, valid }
+    // entries: { file, relPath, format, status, reason, error, table, draft, report, valid }
     // status: 'pending' | 'unsupported' | 'running' | 'ok' | 'failed'
     let entries = [];
 
@@ -130,11 +130,15 @@
 
     function setFiles(fileList) {
         entries = [...fileList]
-            .filter((f) => !f.name.startsWith('.'))
             .map((f) => {
-                const format = FORMAT_BY_EXT[extOf(f.name)] || null;
+                // dotfiles (e.g. .DS_Store) are never processed, but they are listed as
+                // skipped — nothing is silently dropped (the tool's stated contract)
+                const hidden = f.name.startsWith('.');
+                const format = hidden ? null : (FORMAT_BY_EXT[extOf(f.name)] || null);
                 return { file: f, relPath: f.webkitRelativePath || f.name, format,
-                         status: format ? 'pending' : 'unsupported', error: null,
+                         status: format ? 'pending' : 'unsupported',
+                         reason: format ? null : (hidden ? 'hidden file (dotfile)' : 'unsupported extension'),
+                         error: null,
                          table: null, tableData: null, draft: null, report: null, valid: null };
             })
             .sort((a, b) => a.relPath < b.relPath ? -1 : 1);
@@ -236,6 +240,7 @@
         };
         for (const e of entries) {
             const item = { file: e.relPath, status: e.status };
+            if (e.status === 'unsupported') item.reason = e.reason;
             if (e.status === 'ok') {
                 const base = stemOf(e.relPath);
                 item.config = base + '.config.json';
@@ -452,7 +457,7 @@
             const tr = document.createElement('tr');
             const cells = [];
             cells.push(`<td>${esc(e.relPath)}</td>`);
-            if (e.status === 'unsupported') cells.push('<td class="st-skip">skipped — unsupported extension</td><td>—</td><td>—</td><td></td>');
+            if (e.status === 'unsupported') cells.push(`<td class="st-skip">skipped — ${esc(e.reason)}</td><td>—</td><td>—</td><td></td>`);
             else if (e.status === 'pending') cells.push(`<td class="st-skip">pending (${e.format})</td><td>—</td><td>—</td><td></td>`);
             else if (e.status === 'running') cells.push('<td class="st-run">inferring…</td><td>—</td><td>—</td><td></td>');
             else if (e.status === 'failed') cells.push(`<td class="st-err">✖ ${esc(e.error.code)}</td><td colspan="2">${esc(e.error.message)}</td><td></td>`);

@@ -18,7 +18,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..');
-const CORE_SPEC = 'table-validation-core-spec-v1.3.0.md';
+const CORE_SPEC = 'table-validation-core-spec-v1.3.1.md';
 
 function coreSpecPath() {
     const candidates = [ROOT, process.env.TV_SPEC_DIR, path.join(ROOT, '..', 'table-validation-spec')];
@@ -141,7 +141,7 @@ function checkDefaultsTables(TV) {
 
 function runUsageExamples(TV) {
     const errs = [];
-    const md = fs.readFileSync(path.join(ROOT, 'table-validation-js-impl-spec-v1.3.0.md'), 'utf8');
+    const md = fs.readFileSync(path.join(ROOT, 'table-validation-js-impl-spec-v1.3.1.md'), 'utf8');
     const sec8 = md.split('## 8. Usage Examples')[1].split('## 9.')[0];
     const blocks = [];
     const re = /```html\n([\s\S]*?)```/g;

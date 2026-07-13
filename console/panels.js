@@ -833,7 +833,7 @@
                             .map((d) => NS.field(d, ctx, d.path.replace('[]', `[${i}]`))),
                         h('button', { class: 'mini danger', onclick: () => store.dispatch.mutate((d) => { d.comparison.diffChecks[level].splice(i, 1); }) }, 'remove'))));
             }),
-            h('div', { class: 'hint' }, 'type "custom" needs a host function registry — the console cannot provide one, so custom diff checks author/export fine but block in-console runs (§9 guardrail).'));
+            h('div', { class: 'hint' }, 'type "custom" needs a function registry (rule C8). Paste the functions under Advanced mode (④ Run tab) to check and run them here, or run via the API; without Advanced mode the run blocks with a stated reason. The config exports fine either way.'));
 
         return h('section', {}, toggle, matchCard, fieldsCard, sevCard, scopeCard, diffChecksCard, authoringResultPanel(store));
     };
