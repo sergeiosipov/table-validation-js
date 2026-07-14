@@ -137,4 +137,81 @@
             clean();
         },
     });
+
+    // B107 (1.4.0): negativeStyle / pattern / allowBareDecimal are NOT their own configModel
+    // descriptor, so mutation.js's single generic NumberFormat[] mutation never varies them —
+    // rule-12 misuse for these three fields is otherwise exercised engine-side only. Pin the
+    // BUILDER path (createConfigBuilder().validate()) explicitly, with engine parity at the same path.
+    U.push({
+        suite, name: 'rule 12: negativeStyle/pattern/allowBareDecimal misuse rejected through the builder path (createConfigBuilder().validate()), engine parity',
+        fn: ({ assert, assertEq }) => {
+            const mk = (fmt) => ({
+                meta: { schemaVersion: '1.0.0', name: 'p' },
+                evaluation: { strictType: false, timezone: 'utc' },
+                columns: { c0: { type: { name: 'float', formats: [fmt] } } },
+            });
+            const cases = [
+                { field: 'negativeStyle', fmt: { decimalSeparator: '.', groupingSeparators: [','], negativeStyle: 'leadingMinus' } },
+                { field: 'pattern', fmt: { decimalSeparator: '.', groupingSeparators: [','], pattern: '9.99' } },
+                { field: 'allowBareDecimal', fmt: { decimalSeparator: '.', groupingSeparators: [], allowBareDecimal: 'yes' } },
+            ];
+            for (const c of cases) {
+                const cfg = mk(c.fmt);
+                const expectedPath = 'columns.c0.type.formats[0].' + c.field;
+                // (a) the BUILDER rejects it, anchored at the offending field
+                const a = TV().createConfigBuilder(cfg).validate();
+                assert(!a.valid, `${c.field}: builder accepted the misuse`);
+                assert(a.errors.some((e) => e.path === expectedPath),
+                    `${c.field}: no builder error at ${expectedPath}: ${JSON.stringify(a.errors.map((e) => e.path))}`);
+                // (b) engine parity: validate() aborts schemaInvalid at the very same path
+                const run = TV().validate(cfg, { headers: ['c0'], rows: [] });
+                assertEq(run.abortReason, 'schemaInvalid', `${c.field}: engine did not abort schemaInvalid`);
+                const err = run.summary.details.find((d) => d.ruleName === 'schemaValidationError');
+                assertEq(err && err.context.path, expectedPath, `${c.field}: engine anchored elsewhere`);
+            }
+        },
+    });
+
+    // B108 (1.4.0): the 1.3.0 prototype-pollution surface added by format strings — a hostile
+    // '__proto__' fed as a NumberFormat pattern and as a temporal format token, plus a VALID
+    // temporal format whose quoted-literal text contains '__proto__' and so becomes a
+    // luxParseFormat cache key. None of the three may pollute Object.prototype; the two invalid
+    // ones must abort schemaInvalid, and the valid cache-key path must run clean.
+    U.push({
+        suite, name: 'prototype pollution: __proto__ as a NumberFormat pattern / temporal format token / format-string cache key never pollutes',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            const meta = { schemaVersion: '1.0.0', name: 'p' };
+            const evaluation = { strictType: false, timezone: 'utc' };
+            const clean = (lbl) => {
+                assert(({}).polluted === undefined, 'Object.prototype.polluted leaked ' + lbl);
+                assert(Object.getPrototypeOf({}) === Object.prototype, 'prototype chain corrupted ' + lbl);
+            };
+
+            // (a) hostile NumberFormat pattern string → rejected at rule 12, no pollution
+            const numCfg = { meta, evaluation, columns: { c0: { type: { name: 'float', formats: [{ decimalSeparator: '.', groupingSeparators: [','], pattern: '__proto__' }] } } } };
+            const na = TV().createConfigBuilder(numCfg).validate();
+            assert(!na.valid, 'hostile pattern accepted by builder');
+            assertEq(TV().validate(numCfg, { headers: ['c0'], rows: [['1.5']] }).abortReason, 'schemaInvalid', 'hostile pattern did not abort');
+            clean('(pattern)');
+
+            // (b) hostile temporal format token → rejected at rule 21/48, no pollution
+            const tCfg = { meta, evaluation, columns: { c0: { type: { name: 'date', formats: ['__proto__'] } } } };
+            const ta = TV().createConfigBuilder(tCfg).validate();
+            assert(!ta.valid, 'hostile temporal format accepted by builder');
+            assertEq(TV().validate(tCfg, { headers: ['c0'], rows: [['2026-01-01']] }).abortReason, 'schemaInvalid', 'hostile temporal format did not abort');
+            clean('(temporal token)');
+
+            // (c) VALID temporal format carrying '__proto__' as a quoted literal — the format string
+            // itself becomes a luxParseFormat cache key. It must parse a matching cell cleanly with
+            // no pollution from the hostile-substring key.
+            const litCfg = { meta, evaluation, columns: { c0: { type: { name: 'date', formats: ["yyyy-MM-dd'__proto__'"] } } } };
+            const la = TV().createConfigBuilder(litCfg).validate();
+            assert(la.valid, 'valid literal-bearing temporal format wrongly rejected: ' + JSON.stringify(la.errors));
+            const lrun = TV().validate(litCfg, { headers: ['c0'], rows: [['2026-01-01__proto__']] });
+            assertEq(lrun.valid, true, 'literal-cache-key format failed to validate its own cell');
+            assert(!lrun.aborted, 'literal-cache-key format aborted');
+            clean('(literal cache key)');
+        },
+    });
 })();

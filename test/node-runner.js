@@ -34,7 +34,13 @@ const VECTOR_FILES = [
     'vectors/comparison.js', 'vectors/unit.js',
     'vectors/authoring.js', 'vectors/ingest.js', 'vectors/infer.js',
     'vectors/quality.js', 'vectors/corpus.js', 'vectors/fuzz.js', 'vectors/mutation.js',
+    'vectors/console-compiler.js',
 ];
+
+// Console modules the vectors reach into. console/ui.js is a globalThis IIFE that is
+// DOM-free at load time (it only touches `document` inside functions the headless tests
+// never call), so its pure helpers (e.g. compileNumberExample) are exercisable here.
+const CONSOLE_FILES = ['console/ui.js'];
 
 // ---------------- environment ----------------
 
@@ -154,6 +160,7 @@ async function main() {
     runFile(path.join(ROOT, 'dist', 'table-validation.js'));
     const TV = globalThis.TableValidation;
     if (!TV) { console.error('TableValidation global missing'); process.exit(1); }
+    for (const f of CONSOLE_FILES) runFile(path.join(ROOT, f));
     for (const f of VECTOR_FILES) runFile(path.join(ROOT, 'test', f));
 
     for (const v of globalThis.__VECTORS__) {
@@ -214,9 +221,14 @@ async function main() {
         if (docs.coreSpecPath()) {
             const dd = docs.checkDefaultsTables(TV);
             report('docs', `Core §12/§15.12 defaults tables match configModel (${dd.checked} rows)`, dd.errs.length ? 'fail' : 'pass', dd.errs);
+            const sr = docs.checkSettingsReference(TV);
+            report('docs', `Core §11 Settings Reference required/enum match configModel (${sr.checkedRequired} required, ${sr.checkedEnum} enum)`,
+                sr.errs.length ? 'fail' : 'pass', sr.errs);
         } else {
             // the Core Spec lives in the table-validation-spec repository — blocked, never silently skipped
             report('docs', 'Core §12/§15.12 defaults tables match configModel', 'blocked',
+                ['core spec not found: drop a copy in the repo root, set $TV_SPEC_DIR, or clone table-validation-spec as a sibling']);
+            report('docs', 'Core §11 Settings Reference required/enum match configModel', 'blocked',
                 ['core spec not found: drop a copy in the repo root, set $TV_SPEC_DIR, or clone table-validation-spec as a sibling']);
         }
         if (globalThis.luxon && globalThis.ExcelJS) {

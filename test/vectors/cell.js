@@ -449,4 +449,381 @@
         },
     });
 
+    // ---------------- v1.4.0 P4: Settings/overrides/type blocks (B083, B084, B085, B086, B088, B089, B091, B092, B093) ----------------
+
+    V({
+        name: 'B083: column evaluation.strictType:false overrides a table strictType:true',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: true, timezone: 'utc' },
+            columns: { a: { evaluation: { strictType: false }, type: { name: 'int' } } },
+        },
+        table: { headers: ['a'], rows: [['5']] },
+        expect: { valid: true, summary: { bySeverity: { error: 0, warning: 0 } } },
+    });
+
+    V({
+        name: 'B083: column evaluation.strictType:true overrides a table strictType:false',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { a: { evaluation: { strictType: true }, type: { name: 'int' } } },
+        },
+        table: { headers: ['a'], rows: [['5']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 0, ruleName: 'typeMismatch', context: { expectedType: 'int', actualType: 'string' } }],
+        },
+    });
+
+    V({
+        name: 'B083: column evaluation.strictType explicit null inherits the table value (not treated as false)',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: true, timezone: 'utc' },
+            columns: { a: { evaluation: { strictType: null }, type: { name: 'int' } } },
+        },
+        table: { headers: ['a'], rows: [['5']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 0, ruleName: 'typeMismatch', context: { expectedType: 'int', actualType: 'string' } }],
+        },
+    });
+
+    V({
+        name: 'B084: column nullHandling.nullEquivalents overrides the table list per column; a non-overridden column keeps inheriting it',
+        schema: {
+            meta: META, resultConfig: RC,
+            nullHandling: { nullEquivalents: ['NA'] },
+            columns: {
+                a: { nullable: false, nullHandling: { nullEquivalents: ['N/A'] }, type: { name: 'string' } },
+                b: { nullable: false, type: { name: 'string' } },
+            },
+        },
+        table: { headers: ['a', 'b'], rows: [['NA', 'NA'], ['N/A', 'N/A']] },
+        expect: {
+            valid: false,
+            summary: {
+                bySeverity: { error: 2, warning: 0 },
+                byColumn: { a: { error: 1 }, b: { error: 1 } },
+            },
+            cellRegister: [
+                { row: 1, field: 'a', ruleName: 'nullabilityViolation', value: 'N/A' },
+                { row: 0, field: 'b', ruleName: 'nullabilityViolation', value: 'NA' },
+            ],
+        },
+    });
+
+    V({
+        name: 'B085: resultConfig.stopPolicy "firstError" aborts on the first error violation, later rows never checked',
+        schema: {
+            meta: META,
+            resultConfig: { stopPolicy: 'firstError' },
+            columns: { a: { nullable: false, type: { name: 'string' } } },
+        },
+        table: { headers: ['a'], rows: [[null], [null], ['ok']] },
+        expect: {
+            valid: false, aborted: true, abortReason: 'stopPolicy',
+            summary: {
+                bySeverity: { error: 1, warning: 0 },
+                details: [{ ruleName: 'nullabilityViolation', fieldName: 'a', count: 1, firstOccurrenceRow: 0 }],
+            },
+        },
+    });
+
+    V({
+        name: 'B086: resultConfig.collectCellObservations emits the dense per-cell channel (interpreted/effectivelyNull/violation/notChecked)',
+        schema: {
+            meta: META,
+            resultConfig: { collectCellObservations: true, maxErrorsPerColumn: 1 },
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { a: { nullable: true, type: { name: 'int', value: { min: 0, max: 10, minInclusive: true, maxInclusive: true } } } },
+        },
+        table: { headers: ['a'], rows: [['5'], [null], ['99'], ['5']] },
+        expect: {
+            valid: false,
+            cellObservations: [
+                { row: 0, field: 'a', rawValue: '5', interpretedValue: 5, outcome: 'interpreted', worstSeverity: null },
+                { row: 1, field: 'a', rawValue: null, interpretedValue: null, outcome: 'effectivelyNull', worstSeverity: null },
+                { row: 2, field: 'a', rawValue: '99', interpretedValue: 99, outcome: 'violation', worstSeverity: 'error' },
+                { row: 3, field: 'a', rawValue: '5', interpretedValue: null, outcome: 'notChecked', worstSeverity: null },
+            ],
+        },
+    });
+
+    V({
+        name: 'B086: default resultConfig.collectCellObservations is false — result.cellObservations stays null',
+        schema: { meta: META, columns: { a: { type: { name: 'int' } } } },
+        table: { headers: ['a'], rows: [[5]] },
+        expect: { valid: true, cellObservations: null },
+    });
+
+    V({
+        name: 'B088: structure.severities.rowCountBreach:"warning" downgrades an otherwise-error structural breach',
+        schema: {
+            meta: META,
+            structure: {
+                rowCount: { min: 5, max: null, minInclusive: true, maxInclusive: true },
+                severities: { rowCountBreach: 'warning' },
+            },
+            columns: { a: { type: { name: 'string' } } },
+        },
+        table: { headers: ['a'], rows: [['x'], ['y']] },
+        expect: { valid: true, validWithWarnings: true, summary: { bySeverity: { error: 0, warning: 1 } } },
+    });
+
+    V({
+        // Three distinct offending values with distinct frequencies, and insertion order
+        // (nil, NA, null) deliberately != frequency order (NA=3, null=2, nil=1). maxSamples:2
+        // forces BOTH caps to bite: topSampleValues truncates 3 distinct -> 2 (nil dropped),
+        // topSampleRows truncates 6 offending rows -> 2. The descending-frequency sort is
+        // load-bearing: an insertion-order or ascending comparator yields a different array.
+        name: 'B089: resultConfig.maxSamples caps topSampleValues (most-frequent first, overflow dropped) and topSampleRows below the violation count',
+        schema: {
+            meta: META, resultConfig: { maxSamples: 2 },
+            nullHandling: { nullEquivalents: ['NA', 'nil'] },
+            columns: { a: { nullable: false, type: { name: 'string' } } },
+        },
+        table: { headers: ['a'], rows: [['nil'], ['NA'], ['NA'], ['NA'], [null], [null], ['ok']] },
+        expect: {
+            valid: false,
+            summary: {
+                bySeverity: { error: 6, warning: 0 },
+                details: [{
+                    ruleName: 'nullabilityViolation', fieldName: 'a', count: 6, firstOccurrenceRow: 0,
+                    topSampleValues: [{ value: 'NA', frequency: 3 }, { value: 'null', frequency: 2 }],
+                    topSampleRows: [0, 1],
+                }],
+            },
+        },
+    });
+
+    V({
+        name: 'B091: a multi-format column forfeits the direct-parse fallback if ANY format carries a pattern — CONTROL (no pattern anywhere)',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' }, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                a: {
+                    type: {
+                        name: 'float',
+                        formats: [
+                            { decimalSeparator: '.', groupingSeparators: [], negativeStyle: 'trailingMinus' },
+                            { decimalSeparator: '.', groupingSeparators: [','], negativeStyle: 'trailingMinus' },
+                        ],
+                    },
+                },
+            },
+        },
+        table: { headers: ['a'], rows: [['+12.50']] },
+        expect: { valid: true, summary: { bySeverity: { error: 0, warning: 0 } } },
+    });
+
+    V({
+        name: 'B091: only the SECOND of two formats carries a pattern; the fallback is still forfeited for the WHOLE column',
+        schema: {
+            meta: { schemaVersion: '1.3.0', name: 't' }, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                a: {
+                    type: {
+                        name: 'float',
+                        formats: [
+                            { decimalSeparator: '.', groupingSeparators: [], negativeStyle: 'trailingMinus' },
+                            { decimalSeparator: '.', groupingSeparators: [','], negativeStyle: 'trailingMinus', pattern: '0.00' },
+                        ],
+                    },
+                },
+            },
+        },
+        table: { headers: ['a'], rows: [['+12.50']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 0, ruleName: 'typeMismatch', value: '+12.50' }],
+        },
+    });
+
+    V({
+        name: 'B092: categorical typeStrict:true — JSON-type match with strict equality; matchStrategy applies only to string-typed allowed values',
+        schema: {
+            meta: META, resultConfig: RC,
+            columns: { a: { type: { name: 'categorical', allowedValues: [2, 'A'], typeStrict: true } } },
+        },
+        table: { headers: ['a'], rows: [[2], ['A'], ['2'], [3]] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 2, warning: 0 } },
+            cellRegister: [
+                { row: 2, ruleName: 'categoryMismatch', value: '2', context: { typeStrict: true } },
+                { row: 3, ruleName: 'categoryMismatch', value: 3, context: { typeStrict: true } },
+            ],
+        },
+    });
+
+    V({
+        name: 'B093: skip column is type-transparent (object cell passes) but null is still a nullabilityViolation',
+        schema: { meta: META, resultConfig: RC, columns: { a: { nullable: false, type: { name: 'skip' } } } },
+        table: { headers: ['a'], rows: [[{ x: 1 }], [null]] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 1, ruleName: 'nullabilityViolation', value: null }],
+        },
+    });
+
+    V({
+        name: 'B093: skip column uniqueness is keyed on the original values via duplicateDetection.matchStrategy',
+        schema: {
+            meta: META, resultConfig: RC,
+            structure: { duplicateDetection: { matchStrategy: { caseSensitive: false } } },
+            columns: { a: { unique: { enabled: true }, type: { name: 'skip' } } },
+        },
+        table: { headers: ['a'], rows: [['Foo'], ['foo']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 2, warning: 0 } },
+            cellRegister: [
+                { row: 0, ruleName: 'uniquenessViolation', value: 'Foo' },
+                { row: 1, ruleName: 'uniquenessViolation', value: 'foo', context: { duplicateOfRow: 0 } },
+            ],
+        },
+    });
+
+    // ---------------- v1.4.0 P5: §3 primitives edges (B095, B096, B098) ----------------
+
+    V({
+        name: 'B095: allowBareDecimal validate()-path positive pin — ".85"/"-.02" interpret to exact value + precision (no pattern)',
+        schema: {
+            meta: { schemaVersion: '1.2.0', name: 't' },
+            resultConfig: { collectCellRegister: true, collectCellObservations: true },
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                a: {
+                    type: {
+                        name: 'float',
+                        formats: [{ decimalSeparator: '.', groupingSeparators: [], allowBareDecimal: true }],
+                        precision: { min: 2, max: 2, minInclusive: true, maxInclusive: true },
+                    },
+                },
+            },
+        },
+        table: { headers: ['a'], rows: [['.85'], ['-.02']] },
+        expect: {
+            valid: true,
+            cellRegister: [],
+            cellObservations: [
+                { row: 0, field: 'a', rawValue: '.85', interpretedValue: 0.85, outcome: 'interpreted', worstSeverity: null },
+                { row: 1, field: 'a', rawValue: '-.02', interpretedValue: -0.02, outcome: 'interpreted', worstSeverity: null },
+            ],
+        },
+    });
+
+    V({
+        name: 'B096: StringMatchStrategy trim collapses internal whitespace runs to a single space before comparison',
+        schema: {
+            meta: META, resultConfig: RC,
+            columns: {
+                a: { type: { name: 'categorical', allowedValues: ['red car'], matchStrategy: { caseSensitive: false, trim: true, stripSpaces: false } } },
+            },
+        },
+        // '  red   car  ' and 'red  car' both collapse+trim to 'red car' and match; 'redcar' (no
+        // space at all) does NOT match — trim collapses runs, it never removes single spaces.
+        table: { headers: ['a'], rows: [['  red   car  '], ['red  car'], ['redcar']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 2, ruleName: 'categoryMismatch', value: 'redcar' }],
+        },
+    });
+
+    V({
+        name: 'B096: StringMatchStrategy trim reduces a whitespace-only cell to "" for comparison purposes',
+        schema: {
+            meta: META, resultConfig: RC,
+            columns: {
+                a: { nullable: false, type: { name: 'categorical', allowedValues: [''], matchStrategy: { caseSensitive: false, trim: true, stripSpaces: false } } },
+            },
+        },
+        // trim is comparison-only (§3.2), never a data transform: the raw '   ' is not a
+        // null-equivalent, so nullability never fires — it is compared (post-trim) against ''.
+        table: { headers: ['a'], rows: [['   '], ['nomatch']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 1, ruleName: 'categoryMismatch', value: 'nomatch' }],
+        },
+    });
+
+    V({
+        name: 'B096: StringMatchStrategy stripSpaces removes ALL space characters, not just internal runs',
+        schema: {
+            meta: META, resultConfig: RC,
+            columns: {
+                a: { type: { name: 'categorical', allowedValues: ['redcar'], matchStrategy: { caseSensitive: false, trim: false, stripSpaces: true } } },
+            },
+        },
+        table: { headers: ['a'], rows: [['r e d c a r'], ['red car'], [' red  car ']] },
+        expect: { valid: true, cellRegister: [] },
+    });
+
+    V({
+        name: 'B098: int column minInclusive:false rejects the value exactly at min; the next integer passes',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { a: { type: { name: 'int', value: { min: 0, max: 10, minInclusive: false, maxInclusive: true } } } },
+        },
+        table: { headers: ['a'], rows: [['0'], ['1']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 0, ruleName: 'rangeBreach', value: '0', context: { minInclusive: false, maxInclusive: true } }],
+        },
+    });
+
+    V({
+        name: 'B098: float column maxInclusive:false rejects the value exactly at max; a value just below passes',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { a: { type: { name: 'float', value: { min: 0, max: 10, minInclusive: true, maxInclusive: false } } } },
+        },
+        table: { headers: ['a'], rows: [['10'], ['9.99']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 1, warning: 0 } },
+            cellRegister: [{ row: 0, ruleName: 'rangeBreach', value: '10', context: { minInclusive: true, maxInclusive: false } }],
+        },
+    });
+
+    // ---------------- v1.4.0 P8: doc-anchored gaps (B113) ----------------
+
+    V({
+        name: 'B113: severity {default, byRule} resolves PER RULE at runtime — only the keyed rule is overridden, others keep default',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: true, timezone: 'utc' },
+            columns: {
+                a: {
+                    nullable: false,
+                    severity: { default: 'error', byRule: { rangeBreach: 'warning' } },
+                    type: { name: 'int', value: { min: 0, max: 10, minInclusive: true, maxInclusive: true } },
+                },
+            },
+        },
+        table: { headers: ['a'], rows: [[null], [11], ['x']] },
+        expect: {
+            valid: false,
+            summary: { bySeverity: { error: 2, warning: 1 } },
+            cellRegister: [
+                { row: 0, ruleName: 'nullabilityViolation', severity: 'error' },
+                { row: 1, ruleName: 'rangeBreach', severity: 'warning' },
+                { row: 2, ruleName: 'typeMismatch', severity: 'error' },
+            ],
+        },
+    });
+
 })();

@@ -274,4 +274,178 @@
         });
         t.assert(entries > 0 && links === entries, 'every Errors entry carries a Go To hyperlink object');
     }, { needsExcelJS: true });
+
+    // ---- Core §9.5 cellObservations channel (B029): gating, the six outcomes, worstSeverity.
+    U('cellObservations — null unless collected; six-outcome matrix with worstSeverity', (t) => {
+        // gating: absent when the flag is off
+        const off = TV().validate(SIMPLE(), { headers: ['a'], rows: [['x']] });
+        t.assertEq(off.cellObservations, null, 'null when collectCellObservations is off/absent');
+
+        const schema = {
+            meta: META,
+            resultConfig: { collectCellObservations: true },
+            structure: { allowMissingColumns: true },
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: {
+                s: { type: { name: 'string' } },                 // native (string cell → string)
+                n: { type: { name: 'int' } },                    // interpreted (string→int) / violation
+                nl: { nullable: true, type: { name: 'int' } },   // effectivelyNull (native null)
+                w: { severity: 'warning', type: { name: 'int' } }, // violation @ worstSeverity 'warning'
+                sk: { type: { name: 'skip' } },                  // skipped
+                gone: { nullable: true, type: { name: 'string' } }, // absent → notChecked
+            },
+        };
+        const table = {
+            headers: ['s', 'n', 'nl', 'w', 'sk'],
+            rows: [['hi', '5', null, 'bad', 'zz']],
+        };
+        const r = TV().validate(schema, table);
+        t.assert(Array.isArray(r.cellObservations), 'observations collected');
+        const at = (field) => r.cellObservations.find((o) => o.field === field && o.row === 0);
+
+        t.partial({ outcome: 'native', interpretedValue: 'hi', worstSeverity: null }, at('s'), 'native (string)');
+        t.partial({ outcome: 'interpreted', interpretedValue: 5, worstSeverity: null }, at('n'), 'interpreted (string→int)');
+        t.partial({ outcome: 'effectivelyNull', rawValue: null, interpretedValue: null, worstSeverity: null },
+            at('nl'), 'effectivelyNull (native null in nullable column)');
+        t.partial({ outcome: 'violation', interpretedValue: null, worstSeverity: 'warning' },
+            at('w'), 'violation carries worstSeverity of the firing rule (warning)');
+        t.partial({ outcome: 'skipped', worstSeverity: null }, at('sk'), 'skipped (type skip)');
+        t.partial({ outcome: 'notChecked', rawValue: null, interpretedValue: null, worstSeverity: null },
+            at('gone'), 'notChecked (schema column absent from the table)');
+    });
+
+    // ---- exportAnnotatedXlsx (Core §9.5 / JS F6): refusal contract + per-observation tinting (B029).
+    U('exportAnnotatedXlsx — refuses without observations / without ExcelJS; tints violation & interpreted cells', async (t) => {
+        const E = 'TableValidationConfigError';
+        const schema0 = SIMPLE();
+        const table0 = { headers: ['a'], rows: [['x']] };
+        // (a) refuses when observations were not collected
+        const noObs = TV().validate(schema0, table0);
+        let e1 = null;
+        try { await TV().exportAnnotatedXlsx({ result: noObs, table: table0, schema: schema0 }); }
+        catch (e) { e1 = e; }
+        t.assert(e1 && e1.name === E && /cellObservations/.test(e1.message),
+            'rejects without cellObservations, naming the missing setting');
+
+        // (b) refuses when the ExcelJS global is unavailable
+        const saved = globalThis.ExcelJS;
+        try {
+            delete globalThis.ExcelJS;
+            const schemaO = Object.assign(SIMPLE(), { resultConfig: { collectCellObservations: true } });
+            const withObs = TV().validate(schemaO, table0);
+            let e2 = null;
+            try { await TV().exportAnnotatedXlsx({ result: withObs, table: table0, schema: schemaO }); }
+            catch (e) { e2 = e; }
+            t.assert(e2 && e2.name === E, 'rejects without the ExcelJS global');
+        } finally {
+            if (saved) globalThis.ExcelJS = saved;
+        }
+
+        // (c) tints: single 'Annotated' sheet; violation cell → error fill, interpreted cell → interpreted fill
+        const schema = {
+            meta: META,
+            resultConfig: { collectCellObservations: true },
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { a: { type: { name: 'int' } }, b: { type: { name: 'string' } } },
+        };
+        const table = { headers: ['a', 'b'], rows: [['5', 'hi'], ['bad', 'yo']] };
+        const result = TV().validate(schema, table);
+        const blob = await TV().exportAnnotatedXlsx({ result, table, schema });
+        t.assert(blob instanceof Blob && blob.size > 500, 'produces an xlsx Blob');
+        const wb = new globalThis.ExcelJS.Workbook();
+        await wb.xlsx.load(await blob.arrayBuffer());
+        t.assertEq(wb.worksheets.map((w) => w.name), ['Annotated'], 'single Annotated sheet');
+        const ws = wb.getWorksheet('Annotated');
+        // data rows start at 2; col a is column 1
+        const interp = ws.getRow(2).getCell(1);   // '5' → interpreted int
+        t.assert(interp.fill && interp.fill.fgColor && interp.fill.fgColor.argb === 'FFDDEBF7',
+            'interpreted cell carries the interpreted (blue) tint');
+        const viol = ws.getRow(3).getCell(1);      // 'bad' → typeMismatch violation (error)
+        t.assert(viol.fill && viol.fill.fgColor && viol.fill.fgColor.argb === 'FFFFC7CE',
+            'violation cell carries the error (red) tint');
+        const nativeCell = ws.getRow(2).getCell(2); // 'hi' native string → untinted
+        t.assert(!nativeCell.fill || nativeCell.fill.pattern === undefined,
+            'native cell is left untinted');
+    }, { needsExcelJS: true });
+
+    // ---- exportXlsx §9.4 sheet-level contract (B030): open the produced workbook and read it back.
+    U('exportXlsx §9.4 — sheet order, header rows, error sort, Go To targets, highlights, missing column', async (t) => {
+        const schema = {
+            meta: META,
+            resultConfig: { collectCellRegister: true },
+            evaluation: { strictType: true, timezone: 'utc' },
+            columns: {
+                id: { type: { name: 'int' } },                        // error severity
+                amt: { severity: 'warning', type: { name: 'int' } },  // warning severity
+                note: { required: true, type: { name: 'string' } },   // absent → requiredColumnMissing (col-scoped error)
+            },
+        };
+        const table = { headers: ['id', 'amt'], rows: [['x', '1'], ['2', 'y']] };
+        const result = TV().validate(schema, table);
+        t.assertEq(result.valid, false, 'fixture is invalid');
+        const blob = await TV().exportXlsx({ result, table, schema });
+        const wb = new globalThis.ExcelJS.Workbook();
+        await wb.xlsx.load(await blob.arrayBuffer());
+
+        // sheet names AND order
+        t.assertEq(wb.worksheets.map((w) => w.name), ['Summary', 'Errors', 'Data'], 'three sheets in Summary/Errors/Data order');
+
+        // header rows (column sets) for each sheet
+        const errs = wb.getWorksheet('Errors');
+        t.assertEq(errs.getRow(1).values.slice(1),
+            ['#', 'Severity', 'Check', 'Column', 'Row', 'Value', 'Message', 'Go To'],
+            'Errors sheet header (8 columns)');
+        t.assertEq(wb.getWorksheet('Summary').getRow(1).values.slice(1),
+            ['Severity', 'Check', 'Column', 'Message', 'Count', 'First Row', 'Sample Values'],
+            'Summary sheet header (7 columns)');
+        const data = wb.getWorksheet('Data');
+        t.assertEq(data.getRow(1).values.slice(1), ['id', 'amt', 'note'],
+            'Data header: table columns then the missing-column placeholder appended (byName)');
+
+        // Errors rows: errors sort before warnings; Check + Go To pinned per row
+        const rows = [];
+        errs.eachRow((row, n) => {
+            if (n === 1) return;
+            const gt = row.getCell(8).value;
+            rows.push({ sev: row.getCell(2).value, check: row.getCell(3).value,
+                col: row.getCell(4).value, goTo: gt && gt.hyperlink });
+        });
+        t.assertEq(rows, [
+            { sev: 'ERROR', check: 'requiredColumnMissing', col: 'note', goTo: "#'Data'!C1" }, // col-scoped → header cell
+            { sev: 'ERROR', check: 'typeMismatch', col: 'id', goTo: "#'Data'!A2" },            // cell → data cell
+            { sev: 'ERROR', check: 'typeMismatch', col: 'id', goTo: "#'Data'!A3" },
+            { sev: 'WARNING', check: 'typeMismatch', col: 'amt', goTo: "#'Data'!B2" },
+            { sev: 'WARNING', check: 'typeMismatch', col: 'amt', goTo: "#'Data'!B3" },
+        ], 'errors-before-warnings sort with per-entry Go To targets');
+
+        // data-cell highlights: error red on id[row0], warning yellow on amt[row1], error red on missing-col header
+        t.assert(data.getRow(2).getCell(1).fill.fgColor.argb === 'FFFFC7CE', 'id row0 cell tinted error red');
+        t.assert(data.getRow(3).getCell(2).fill.fgColor.argb === 'FFFFEB9C', 'amt row1 cell tinted warning yellow');
+        t.assert(data.getRow(1).getCell(3).fill.fgColor.argb === 'FFFFC7CE', 'missing-column header tinted error red');
+
+        // sheet formatting: frozen header row, autofilter across the used range, bold grey header
+        t.assertEq(data.views[0].state, 'frozen', 'Data header row frozen');
+        t.assertEq(data.views[0].ySplit, 1, 'freeze split at row 1');
+        t.assertEq(data.autoFilter, 'A1:C3', 'autofilter spans header + data across all columns');
+        t.assertEq(data.getRow(1).getCell(1).font.bold, true, 'header cells bold');
+    }, { needsExcelJS: true });
+
+    // ---- exportXlsx byPosition synthesized header note (B030 cont.)
+    U('exportXlsx — byPosition Data sheet synthesizes a header row and notes it on A1', async (t) => {
+        const schema = {
+            meta: META,
+            resultConfig: { collectCellRegister: true },
+            structure: { columnMatching: 'byPosition' },
+            columns: { a: { type: { name: 'int' } } },
+        };
+        const table = { headers: null, rows: [['x']] };
+        const result = TV().validate(schema, table);
+        const blob = await TV().exportXlsx({ result, table, schema });
+        const wb = new globalThis.ExcelJS.Workbook();
+        await wb.xlsx.load(await blob.arrayBuffer());
+        const data = wb.getWorksheet('Data');
+        t.assertEq(data.getRow(1).values.slice(1), ['a'], 'header synthesized from schema column names');
+        t.assert(/synthesized/.test(String(data.getCell('A1').note || '')),
+            'A1 carries the byPosition synthesized-header note');
+    }, { needsExcelJS: true });
 })();

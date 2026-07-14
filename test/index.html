@@ -32,12 +32,14 @@
             const v = '?cb=' + Date.now();
             const files = [
                 '../dist/table-validation.js',
+                '../console/ui.js',
                 'vectors/schema-phase.js', 'vectors/structural.js', 'vectors/cell.js',
                 'vectors/parser-negatives.js', 'vectors/aggregate.js', 'vectors/row-checks.js',
                 'vectors/table-checks.js', 'vectors/breakers.js', 'vectors/temporal.js',
                 'vectors/comparison.js', 'vectors/unit.js',
                 'vectors/authoring.js', 'vectors/ingest.js', 'vectors/infer.js',
                 'vectors/quality.js', 'vectors/corpus.js', 'vectors/fuzz.js', 'vectors/mutation.js',
+                'vectors/console-compiler.js',
                 'runner.js',
             ];
             document.write(files.map((f) => `<scr` + `ipt src="${f}${v}"></scr` + `ipt>`).join('\n'));

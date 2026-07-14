@@ -174,6 +174,82 @@ with sync_playwright() as p:
         s.dispatch.setMessageTemplates('');
     }""")
     page.wait_for_timeout(200)
+
+    # B033 / UI arch §5: the "+ from example" button compiles a NumberFormat example
+    # and APPENDS it to the column's formats array (preview-before-commit, never silent).
+    # Real DOM path through console/ui.js exampleCompiler on a float column's type editor.
+    page.evaluate("""() => {
+        const s = window.__tvconsole;
+        s.dispatch.mutate((d) => { d.columns = { price: { type: { name: 'float' } } }; });
+        s.dispatch.setTab('schema');
+        s.dispatch.selectSchema('_columns', 'price');
+    }""")
+    page.wait_for_selector(".fmt-example input")
+    page.locator(".fmt-example input").first.fill("1.234,50")
+    page.wait_for_selector(".fmt-example button.mini")
+    page.locator(".fmt-example button.mini").first.click()
+    page.evaluate("""() => {
+        const s = window.__tvconsole;
+        const fmts = ((s.state.authoring.doc.columns.price.type || {}).formats) || [];
+        const f = fmts[0] || {};
+        const ok = fmts.length === 1 && f.decimalSeparator === ',' &&
+            Array.isArray(f.groupingSeparators) && f.groupingSeparators.length === 1 && f.groupingSeparators[0] === '.';
+        if (!ok) throw new Error('example compiler did not append the compiled format: ' + JSON.stringify(fmts));
+        if (!s.state.authoring.lastValidation.valid) throw new Error('appended format left the config authoring-invalid: ' + JSON.stringify(s.state.authoring.lastValidation.errors));
+    }""")
+
+    # B034 / 1.3.0 console guardrail: a dotted/bracketed INFERRED column name validates
+    # fine but cannot be addressed by the per-column dotted-path editor — inferAccept must
+    # warn (store.js). The notice must render as a STYLED 'notice warn' (guards the C4
+    # wrong-notice-kind styling bug: a bad kind yields an unstyled 'notice <kind>').
+    page.evaluate("""async () => {
+        const s = window.__tvconsole;
+        s.state.ui.notices.length = 0;
+        s.dispatch.pasteText('produced', '[{"price.eur":1.5,"qty":2},{"price.eur":2.5,"qty":3}]');
+        await s.dispatch.ingest('produced');
+        if (s.state.data.produced.status !== 'ready') throw new Error('dotted-header ingest failed: ' + JSON.stringify(s.state.data.produced.error));
+        s.dispatch.inferRun();
+        if (s.state.inference.status !== 'offered') throw new Error('no inference offer for the dotted-header table');
+        if (!s.state.inference.offer.draft.columns['price.eur']) throw new Error('draft omitted the dotted column');
+        s.dispatch.inferAccept();
+        const warn = s.state.ui.notices.find((n) => n.kind === 'warn' && n.text.indexOf('or brackets') >= 0);
+        if (!warn) throw new Error('dotted-name guardrail warning missing: ' + JSON.stringify(s.state.ui.notices));
+    }""")
+    page.wait_for_timeout(150)
+    assert page.locator(".notice.warn", has_text="or brackets").count() >= 1, "dotted-name warning not rendered as a styled 'notice warn'"
+
+    # B034: the rename guard (panels.js) rejects a dotted target with an error notice and
+    # leaves the column untouched — driven through the real rename control.
+    page.evaluate("""() => {
+        const s = window.__tvconsole;
+        s.state.ui.notices.length = 0;
+        s.dispatch.setTab('schema');
+        s.dispatch.selectSchema('_columns', 'qty');
+    }""")
+    page.wait_for_selector(".card-title input.narrow")
+    page.locator(".card-title input.narrow").first.fill("a.b")
+    page.get_by_role("button", name="rename").click()
+    page.evaluate("""() => {
+        const s = window.__tvconsole;
+        const err = s.state.ui.notices.find((n) => n.kind === 'error' && n.text.indexOf('must not contain') >= 0);
+        if (!err) throw new Error('rename dotted-name guard missing: ' + JSON.stringify(s.state.ui.notices));
+        if (s.state.authoring.doc.columns['a.b']) throw new Error('rename to a dotted name should have been blocked');
+    }""")
+
+    # B034: the add-column guard rejects a dotted new name (same guard, add path).
+    page.get_by_role("button", name="+ add", exact=True).click()
+    page.evaluate("""() => {
+        const s = window.__tvconsole;
+        if (!s.state.ui.dialog) throw new Error('add-column dialog did not open');
+        s.state.ui.notices.length = 0;
+        s.dispatch.dialogSetValue('c.d');
+        s.dispatch.dialogOk();
+        const err = s.state.ui.notices.find((n) => n.kind === 'error' && n.text.indexOf('must not contain') >= 0);
+        if (!err) throw new Error('add-column dotted-name guard missing: ' + JSON.stringify(s.state.ui.notices));
+        if (s.state.authoring.doc.columns['c.d']) throw new Error('adding a dotted-name column should have been blocked');
+    }""")
+
+    page.wait_for_timeout(200)
     browser.close()
 
 fatal = [e for e in errors if "favicon" not in e]
