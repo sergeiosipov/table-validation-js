@@ -249,6 +249,67 @@ with sync_playwright() as p:
         if (s.state.authoring.doc.columns['c.d']) throw new Error('adding a dotted-name column should have been blocked');
     }""")
 
+    # v1.4.0 comparison-flow (§15.8): the per-column ToleranceSpec editor. Build a
+    # comparison config with a numeric column whose produced/expected values differ within
+    # an absolute tolerance; drive the tolerance editor via the real DOM (form selector +
+    # inputs), run compare, and assert a toleranceMatch cell appears in the diff. Then switch
+    # the same field to the {percent, of} form and assert the ACTIVE config JSON updates.
+    page.evaluate("""async () => {
+        const s = window.__tvconsole;
+        s.dispatch.mutate((d) => {
+            d.meta = { schemaVersion: '1.0.0', name: 'tol-drive' };
+            // pasted CSV cells are strings; strictType:false lets them interpret as int/float
+            // (mirrors an inference-driven config, whose numeric columns parse string cells)
+            d.evaluation = { strictType: false };
+            d.columns = { id: { type: { name: 'int' } }, amount: { type: { name: 'float' } } };
+            delete d.comparison; delete d.compositeKeys; delete d.customRowChecks; delete d.customTableChecks;
+        });
+        s.dispatch.toggleComparison(true);
+        s.dispatch.edit('comparison.match.keys', ['id']);
+        s.dispatch.pasteText('produced', 'id,amount\\n1,10.02\\n2,20.05\\n');
+        await s.dispatch.ingest('produced');
+        s.dispatch.pasteText('expected', 'id,amount\\n1,10.00\\n2,20.00\\n');
+        await s.dispatch.ingest('expected');
+        if (s.state.data.produced.status !== 'ready' || s.state.data.expected.status !== 'ready') {
+            throw new Error('compare ingest failed: ' + JSON.stringify([s.state.data.produced.error, s.state.data.expected.error]));
+        }
+        if (!s.state.authoring.lastValidation.valid) throw new Error('tolerance-drive config not authoring-valid: ' + JSON.stringify(s.state.authoring.lastValidation.errors));
+        s.dispatch.setTab('comparison');
+    }""")
+    page.wait_for_timeout(150)
+    # absolute form via the DOM (the 'amount' row's tolerance editor: form selector + input)
+    amount_row = page.locator("tr", has_text="amount")
+    amount_row.locator(".tol-editor select").first.select_option("absolute")
+    page.wait_for_timeout(100)
+    amount_row.locator(".tol-editor input").first.fill("0.1")
+    amount_row.locator(".tol-editor input").first.dispatch_event("change")
+    page.wait_for_timeout(100)
+    page.evaluate("""async () => {
+        const s = window.__tvconsole;
+        const t = s.state.authoring.doc.comparison.fields.amount.tolerance;
+        if (t !== 0.1) throw new Error('absolute tolerance not committed via the editor: ' + JSON.stringify(s.state.authoring.doc.comparison.fields));
+        await s.dispatch.run('compare');
+        if (s.state.run.status !== 'done') throw new Error('compare run failed: ' + JSON.stringify(s.state.run.error));
+        const rows = s.state.run.result.diff.rows;
+        const seen = rows.map((r) => r.cells && r.cells.amount && r.cells.amount.tier);
+        if (!seen.includes('toleranceMatch')) throw new Error('expected a toleranceMatch cell in the diff, saw ' + JSON.stringify(seen));
+        s.dispatch.setTab('comparison');
+    }""")
+    page.wait_for_timeout(150)
+    # switch the same field to the {percent, of} form and set the percent via the DOM
+    amount_row.locator(".tol-editor select").first.select_option("percent")
+    page.wait_for_timeout(100)
+    amount_row.locator(".tol-editor input").first.fill("0.5")
+    amount_row.locator(".tol-editor input").first.dispatch_event("change")
+    page.wait_for_timeout(100)
+    page.evaluate("""() => {
+        const s = window.__tvconsole;
+        const t = s.state.authoring.doc.comparison.fields.amount.tolerance;
+        if (!t || typeof t !== 'object' || t.percent !== 0.5 || typeof t.of !== 'string') {
+            throw new Error('{percent, of} form did not round-trip into the active config: ' + JSON.stringify(t));
+        }
+    }""")
+
     page.wait_for_timeout(200)
     browser.close()
 

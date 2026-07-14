@@ -22,6 +22,12 @@
  *   'compare'     args: [schema, produced, expected, options?] → ComparisonResult
  *   'ingest'      args: [source, ingestSpec, options?]      → IngestResult
  *   'inferConfig' args: [table, options?]                    → InferenceResult
+ *   'exportXlsx'            args: [{ result, table, schema }]           → Blob
+ *   'exportComparisonXlsx' args: [{ result, table, schema, expected }] → Blob
+ *   'exportAnnotatedXlsx'  args: [{ result, table, schema }]           → Blob
+ *                 The export ops require the ExcelJS global inside the worker (importScripts
+ *                 it via 'init'); absent → the same "ExcelJS global is required" config error
+ *                 the main-thread exporters raise. Returned Blobs are structured-clone-safe.
  *   'ping'        args: []                                   → { version }
  *
  * Structured-clone safety: results are sanitized before posting — any non-plain object
@@ -91,6 +97,12 @@ importScripts('table-validation.js');
                 result = sanitize(await TV.ingest(args[0], args[1], args[2]));
             } else if (op === 'inferConfig') {
                 result = sanitize(TV.inferConfig(args[0], args[1]));
+            } else if (op === 'exportXlsx') {
+                result = sanitize(await TV.exportXlsx(args[0]));
+            } else if (op === 'exportComparisonXlsx') {
+                result = sanitize(await TV.exportComparisonXlsx(args[0]));
+            } else if (op === 'exportAnnotatedXlsx') {
+                result = sanitize(await TV.exportAnnotatedXlsx(args[0]));
             } else {
                 throw new TV.TableValidationConfigError(`unknown worker op "${op}"`);
             }
