@@ -390,7 +390,11 @@ def main():
         perfield = cards().nth(2)
         amount_row = perfield.locator("tr", has_text="amount")
         fill_commit(amount_row.get_by_placeholder("(same header)"), "Betrag")
-        fill_commit(amount_row.get_by_placeholder("e.g. 0.01", exact=False), "0.01")
+        # the ToleranceSpec editor (§15.8) is a form selector + the chosen form's inputs;
+        # pick the absolute form, then enter the cent tolerance
+        amount_row.locator(".tol-editor select").first.select_option("absolute")
+        settle(150)
+        fill_commit(amount_row.get_by_placeholder("ε ≥ 0"), "0.01")
         doc = state("authoring.doc")
         check(doc["comparison"]["fields"]["amount"] == {"expectedName": "Betrag", "tolerance": 0.01},
               f"per-field edits: {doc['comparison'].get('fields')}")
@@ -544,6 +548,54 @@ def main():
         check(err["code"] == "formatMismatch", f"expected formatMismatch, got {err}")
         facts["ingestError"] = {"code": err["code"], "message": err["message"]}
         shot(prod, "10-ingest-error.png")
+
+        # ============ ch9: number formats — the from-example compiler + a pattern/negativeStyle form ============
+        # `amount` is a float column (from the ch5 clean re-infer), so its type block carries a
+        # NumberFormat[] `formats` field with the example-to-format compiler beside it.
+        print("[ch9] number formats: compiler + pattern/negativeStyle form")
+        js("""() => {
+            const d = window.__tvconsole.dispatch;
+            d.setTab('schema');
+            d.selectSchema('_columns', 'amount');
+        }""")
+        settle()
+        clean_notices()
+        detail = page.locator(".detail > .card").first
+        fmt_field = detail.locator("div.field:has(.fmt-example)")
+        check(fmt_field.count() >= 1, "float column editor has no NumberFormat formats field")
+        # example → format: typing a sample compiles it to an append button (nothing silent)
+        example_input = fmt_field.locator(".fmt-example input")
+        example_input.fill("(1 234,50)")
+        settle(200)
+        chip = fmt_field.locator(".fmt-example button.mini")
+        check(chip.count() >= 1, "example compiler produced no compiled-format button")
+        facts["compiledExample"] = chip.first.inner_text()
+        shot(fmt_field, "09-compiler.png")
+        example_input.fill("")
+        settle(100)
+        # a pattern + negativeStyle-bearing NumberFormat, shown in the formats field
+        js("""() => window.__tvconsole.dispatch.edit('columns.amount.type.formats',
+            [{ decimalSeparator: '.', groupingSeparators: [','], negativeStyle: 'parentheses', pattern: '#,##0.00' }])""")
+        settle()
+        v = state("authoring.lastValidation")
+        check(v["valid"] is True, f"pattern/negativeStyle format should author clean, got {v}")
+        shot(detail, "09-numberformat.png")
+
+        # ============ ch7: the ToleranceSpec editor (§15.8) — a non-absolute form ============
+        # comparison is on (from the ch7 flow, carried through the workspace import); show the
+        # per-row/percent selector rather than the plain absolute number.
+        print("[ch7] tolerance editor")
+        js("""() => {
+            const d = window.__tvconsole.dispatch;
+            d.setTab('comparison');
+            d.edit('comparison.fields.amount.tolerance', { percent: 0.5, of: 'amount' });
+        }""")
+        settle()
+        perfield = cards().nth(2)
+        amount_row = perfield.locator("tr", has_text="amount")
+        tol = amount_row.locator(".tol-editor")
+        check(tol.count() >= 1, "tolerance editor cell not rendered for the numeric column")
+        shot(tol, "07-tolerance-editor.png")
 
         browser.close()
     srv.shutdown()
