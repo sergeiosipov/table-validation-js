@@ -501,6 +501,166 @@
     });
 
     U.push({
+        suite, name: 'encoding (Addendum §B.5): UTF-16BE BOM (FE FF); already-decoded string source strips a leading BOM char',
+        fn: async ({ assertEq }) => {
+            // FE FF → utf-16be
+            const s = 'a\n1';
+            const u16 = new Uint8Array(2 + s.length * 2);
+            u16[0] = 0xFE; u16[1] = 0xFF;
+            for (let i = 0; i < s.length; i++) { u16[2 + i * 2] = 0; u16[3 + i * 2] = s.charCodeAt(i); }
+            const r = await TV().ingest(u16, { format: 'csv' });
+            assertEq(r.source.encodingUsed, 'utf-16be', 'FE FF → utf-16be');
+            assertEq(r.table.rows, [['1']], 'utf-16be decoded');
+            // already-decoded JS string (no bytes involved) beginning with U+FEFF: the leading
+            // BOM character is stripped even though no decoding step ran (encodingUsed stays null)
+            const withBomStr = '﻿a\n1';
+            const r2 = await TV().ingest(withBomStr, { format: 'csv' });
+            assertEq(r2.table.headers, ['a'], 'leading BOM character stripped from a string source');
+            assertEq(r2.source.encodingUsed, null, 'no byte-decoding step ran, so encodingUsed is still null');
+        },
+    });
+
+    U.push({
+        suite, name: 'xlsx (Addendum §B.3): trailing all-null rows/columns dropped, interior rows/columns preserved',
+        needsExcelJS: true,
+        fn: async ({ assertEq }) => {
+            const wb = new window.ExcelJS.Workbook();
+            const ws = wb.addWorksheet('Data');
+            ws.addRow(['a', 'b', null]);        // header row: column c is null here too (all-null trailing column)
+            ws.addRow([1, 2, null]);
+            ws.addRow([null, null, null]);      // interior all-null row — must be PRESERVED
+            ws.addRow([4, 5, null]);
+            ws.addRow([null, null, null]);      // trailing all-null row — must be DROPPED
+            const buffer = await wb.xlsx.writeBuffer();
+            const r = await TV().ingest(buffer, { format: 'xlsx' });
+            assertEq(r.table.headers, ['a', 'b'], 'trailing all-null column (c) dropped');
+            assertEq(r.table.rows, [[1, 2], [null, null], [4, 5]],
+                'trailing all-null row dropped; interior all-null row kept as [null, null]');
+            assertEq(r.source.columnCount, 2, 'provenance reflects the post-drop width');
+        },
+    });
+
+    U.push({
+        suite, name: 'xlsx (Addendum §B.7): IngestWarning collapses repeated same-code/same-column warnings via count',
+        needsExcelJS: true,
+        fn: async ({ assertEq }) => {
+            const wb = new window.ExcelJS.Workbook();
+            const ws = wb.addWorksheet('Data');
+            ws.addRow(['a']);
+            ws.addRow(['x']);
+            ws.addRow(['y']);
+            ws.addRow(['z']);
+            ws.addRow(['w']);
+            ws.mergeCells('A2:A3');  // merge #1 in column 0
+            ws.mergeCells('A4:A5');  // merge #2 in column 0 — same code+column as #1
+            const buffer = await wb.xlsx.writeBuffer();
+            const r = await TV().ingest(buffer, { format: 'xlsx' });
+            assertEq(r.warnings, [{
+                code: 'mergedCell', message: 'Merged range: non-master cells emitted as null',
+                row: 1, column: 0, count: 2,
+            }], 'two same-code/same-column merges collapse into one warning; count=2, row=first occurrence');
+        },
+    });
+
+    U.push({
+        suite, name: 'normalization (Addendum §B.8): reformatNumber negativeStyle canonicalization (parentheses, trailingMinus)',
+        fn: async ({ assertEq }) => {
+            const one = async (params, cells) => {
+                const r = await TV().ingest([cells], { format: 'jsonArrays', normalization: { table: [{ fn: 'reformatNumber', params }] } });
+                return r.table.rows[0];
+            };
+            assertEq(
+                await one({ format: { decimalSeparator: ',', groupingSeparators: ['.'], negativeStyle: 'parentheses' } },
+                    ['(1.234,50)', '1.234,50', 'x']),
+                ['-1234.50', '1234.50', 'x'],
+                'parentheses: "(1.234,50)" -> "-1234.50"; unwrapped form stays positive; unparseable passes through');
+            assertEq(
+                await one({ format: { decimalSeparator: '.', groupingSeparators: [','], negativeStyle: 'trailingMinus' } },
+                    ['1,234.50-', '5.00', 'x']),
+                ['-1234.50', '5.00', 'x'],
+                'trailingMinus: trailing "-" canonicalizes to a leading "-"');
+        },
+    });
+
+    U.push({
+        suite, name: 'normalization (Addendum §B.8, 1.3.0): reformatTemporal twoDigitYearPivot',
+        needsLuxon: true,
+        fn: async ({ assert, assertEq }) => {
+            const reform = (params, cell) => TV().ingest([[cell]], {
+                format: 'jsonArrays',
+                normalization: { table: [{ fn: 'reformatTemporal', params: Object.assign({ from: ['dd.MM.yy'], to: 'yyyy-MM-dd' }, params) }] },
+            }).then((r) => r.table.rows[0][0]);
+            assertEq(await reform({}, '15.07.61'), '1961-07-15', 'default pivot 1961: yy=61 -> 1961 (pivot itself)');
+            assertEq(await reform({ twoDigitYearPivot: 1900 }, '15.07.61'), '1961-07-15',
+                'custom pivot 1900: yy=61 still maps to 1961 (within [1900, 1999])');
+            assertEq(await reform({ twoDigitYearPivot: 1900 }, '15.07.19'), '1919-07-15',
+                'custom pivot 1900: yy=19 maps to 1919, not 2019');
+            const err = await expectCode(assert, TV().ingest([['15.07.61']], {
+                format: 'jsonArrays',
+                normalization: { table: [{ fn: 'reformatTemporal', params: { from: ['dd.MM.yy'], to: 'yyyy-MM-dd', twoDigitYearPivot: 42 } }] },
+            }), 'ingestSpecInvalid', 'out-of-range pivot');
+            assertEq(err.detail, [{ path: 'normalization.table[0].params.twoDigitYearPivot', expected: 'integer in [1000, 9899]', actual: 42 }],
+                'shape-validated to [1000, 9899]');
+        },
+    });
+
+    U.push({
+        suite, name: 'normalization (Addendum §B.8, 1.3.0, B059): reformatTemporal `to`-format SSSSSS microsecond rendering',
+        needsLuxon: true,
+        fn: async ({ assertEq }) => {
+            // Luxon has no native 6-digit sub-second render token; a `to` format containing
+            // SSSSSS renders the (truncated) 3-digit millisecond value plus a literal "000" —
+            // a documented six-digit-resolution workaround, not genuine microsecond precision.
+            const reform = (cell) => TV().ingest([[cell]], {
+                format: 'jsonArrays',
+                normalization: {
+                    table: [{ fn: 'reformatTemporal', params: { from: ['yyyy-MM-dd HH:mm:ss.SSS'], to: 'yyyy-MM-dd HH:mm:ss.SSSSSS' } }],
+                },
+            }).then((r) => r.table.rows[0][0]);
+            assertEq(await reform('2026-07-13 12:00:00.123'), '2026-07-13 12:00:00.123000',
+                'millisecond value 123 renders as 123 followed by a literal 000');
+            assertEq(await reform('2026-07-13 12:00:00.007'), '2026-07-13 12:00:00.007000',
+                'sub-100ms value stays zero-padded to 3 digits before the literal 000');
+        },
+    });
+
+    U.push({
+        suite, name: 'normalization (Addendum §B.8): stripAffix no-match-but-trimmed passthrough; promoteBool overlap I9 error',
+        fn: async ({ assert, assertEq }) => {
+            const noMatch = await TV().ingest([['  hello  ']], {
+                format: 'jsonArrays',
+                normalization: { table: [{ fn: 'stripAffix', params: { prefixes: ['$'], suffixes: ['%'] } }] },
+            });
+            assertEq(noMatch.table.rows[0], ['hello'],
+                'no prefix/suffix matched, but the trimmed form is still returned (alsoTrim default true)');
+            const err = await expectCode(assert, TV().ingest([['x']], {
+                format: 'jsonArrays',
+                normalization: { table: [{ fn: 'promoteBool', params: { trueValues: ['Y'], falseValues: ['y'] } }] },
+            }), 'ingestSpecInvalid', 'trueValues/falseValues overlap after matchStrategy');
+            assertEq(err.detail, [{
+                path: 'normalization.table[0].params.trueValues',
+                expected: 'no overlap with falseValues after matchStrategy', actual: 'y',
+            }], 'I9: overlap detected after default case-insensitive strategy ("Y" and "y" collide)');
+        },
+    });
+
+    U.push({
+        suite, name: 'normalization (Addendum §B.8, B057): stripAffix alsoTrim:false — no trim before matching, none after',
+        fn: async ({ assertEq }) => {
+            const one = async (cell, params) => {
+                const r = await TV().ingest([[cell]], { format: 'jsonArrays', normalization: { table: [{ fn: 'stripAffix', params }] } });
+                return r.table.rows[0][0];
+            };
+            assertEq(await one('  $12  ', { prefixes: ['$'], alsoTrim: false }), '  $12  ',
+                'alsoTrim:false: leading whitespace before the affix blocks the match, and the untouched cell passes through untrimmed');
+            assertEq(await one('$12  ', { prefixes: ['$'], alsoTrim: false }), '12  ',
+                'alsoTrim:false: a direct affix match still strips, but trailing whitespace after stripping is kept, not trimmed');
+            assertEq(await one('  $12  ', { prefixes: ['$'], alsoTrim: true }), '12',
+                'control: alsoTrim:true (default) trims before matching and after stripping');
+        },
+    });
+
+    U.push({
         suite, name: 'normalization (1.3.1): non-scalar cells pass through built-ins as no-ops',
         fn: async ({ assert, assertEq }) => {
             // pre-1.3.1 the trim pass threw normalizationFunctionContractViolation on the object cell

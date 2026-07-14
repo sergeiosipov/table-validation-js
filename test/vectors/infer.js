@@ -609,4 +609,378 @@
         },
     });
 
+    // ---------------- v1.4.0: inference long-tails (P2) ----------------
+
+    U.push({
+        suite, name: 'long-tail: native booleans win the bool ladder step; the 3 time-table candidates each infer',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            const { draft, report } = TV().inferConfig({ headers: ['a'], rows: [[true], [false], [true]] });
+            const c = report.columns[0];
+            assertEq(c.inferredType, 'bool', 'native booleans qualify for the bool win');
+            assertEq(c.confidence, 'high', 'unambiguous');
+            assertEq(draft.evaluation.strictType, true, 'native bool participants with relied=false keep strictType true');
+            assert(!c.observed.reliedOnInterpretation, 'native bool reading needs no interpretation');
+            assertN1(assert, draft, 'native-bool');
+
+            const table = [
+                { fmt: 'HH:mm:ss', rows: ['14:30:45', '09:00:12'] },
+                { fmt: 'HH:mm', rows: ['14:30', '09:05'] },
+                { fmt: 'HH:mm:ss.SSS', rows: ['14:30:45.123', '09:00:12.000'] },
+            ];
+            for (const { fmt, rows: r } of table) {
+                const t = { headers: ['t'], rows: r.map((v) => [v]) };
+                const res = TV().inferConfig(t);
+                assertEq(res.report.columns[0].inferredType, 'time', `${fmt}: infers time`);
+                assertEq(res.report.columns[0].confidence, 'high', `${fmt}: unambiguous`);
+                assertEq(res.draft.columns.t.type.formats, [fmt], `${fmt}: drafted format`);
+                assert(TV().validate(res.draft, t).valid, `${fmt}: draft validates its own sample`);
+            }
+        },
+    });
+
+    U.push({
+        suite, name: 'long-tail: categorical rejection boundaries (participants<20; distinct>12; ratio>0.2) and typeStrict:false at the floor',
+        fn: ({ assert, assertEq }) => {
+            const rows19 = Array.from({ length: 19 }, (_, i) => [['A', 'B', 'C'][i % 3]]);
+            const r19 = TV().inferConfig({ headers: ['c'], rows: rows19 });
+            assertEq(r19.report.columns[0].inferredType, 'string', '19 participants: below the 20-row floor');
+
+            // 65 rows, 13 distinct values: ratio is exactly 0.2 (at the ratio floor) but
+            // distinct(13) > 12, so the distinct-count boundary alone rejects it
+            const rows65 = Array.from({ length: 65 }, (_, i) => ['V' + (i % 13)]);
+            const r65 = TV().inferConfig({ headers: ['c'], rows: rows65 });
+            assertEq(r65.report.columns[0].inferredType, 'string', '13 distinct values: over the 12-distinct ceiling');
+
+            // 20 rows, 6 distinct values: ratio 0.3 > 0.2
+            const rows20a = Array.from({ length: 20 }, (_, i) => ['V' + (i % 6)]);
+            const rA = TV().inferConfig({ headers: ['c'], rows: rows20a });
+            assertEq(rA.report.columns[0].inferredType, 'string', 'ratio 0.3: over the 0.2 ceiling');
+
+            // 20 rows, 4 distinct values: ratio exactly 0.2 -> qualifies (inclusive boundary)
+            const rows20b = Array.from({ length: 20 }, (_, i) => ['V' + (i % 4)]);
+            const rB = TV().inferConfig({ headers: ['c'], rows: rows20b });
+            assertEq(rB.report.columns[0].inferredType, 'categorical', 'ratio exactly 0.2: qualifies');
+            assertEq(rB.draft.columns.c.type.allowedValues, ['V0', 'V1', 'V2', 'V3'], 'values sorted');
+            assertEq(rB.draft.columns.c.type.typeStrict, false, 'categorical drafts always relax typeStrict');
+            assertN1(assert, rB.draft, 'categorical-floor');
+        },
+    });
+
+    U.push({
+        suite, name: 'long-tail: combined data-loss-guard reasons; combined yy reasons (solo + union coverage); union-coverage observed extremes',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            // B042: a column carrying BOTH the leadingZeroInt and unsafeInt reasons at once
+            const combo = TV().inferConfig({ headers: ['id'], rows: [['007'], ['9007199254740993']] });
+            const cc = combo.report.columns[0];
+            assertEq(cc.inferredType, 'string', 'either data-loss reason keeps the column conservative');
+            assertEq(cc.reasons, ['leadingZeroInt', 'unsafeInt'], 'both reasons present, in that order');
+            assertEq(cc.alternatives, [{ type: 'float', formats: null, rank: 1 }], 'the lossy float reading is the alternative');
+
+            // B043: a yy column where BOTH dd/MM/yy and MM/dd/yy accept -> multipleTemporalFormats + twoDigitYear
+            const yyAmbig = TV().inferConfig({ headers: ['d'], rows: [['01/02/19'], ['03/04/19']] });
+            const ya = yyAmbig.report.columns[0];
+            assertEq(ya.inferredType, 'date', 'ambiguous yy column still infers the candidate-order winner');
+            assertEq(ya.confidence, 'ambiguous', 'yy is always ambiguous');
+            assertEq(ya.reasons, ['multipleTemporalFormats', 'twoDigitYear'], 'both reasons appended');
+            assertEq(yyAmbig.draft.columns.d.type.formats, ['dd/MM/yy'], 'candidate-order winner drafted');
+            assertEq(ya.alternatives, [{ type: 'date', formats: ['MM/dd/yy'], rank: 1 }], 'the other yy reading is the alternative');
+            assertN1(assert, yyAmbig.draft, 'yy-combined-reasons');
+
+            // B044: allAcceptingFormats union coverage that crosses into a yy candidate
+            const union = { headers: ['d'], rows: [['30/06/19'], ['01/12/20'], ['2026-07-15']] };
+            const onUnion = TV().inferConfig(union, { allAcceptingFormats: true });
+            const uc = onUnion.report.columns[0];
+            assertEq(uc.inferredType, 'date', 'union coverage infers date across families');
+            assertEq(onUnion.draft.columns.d.type.formats, ['dd/MM/yy', 'yyyy-MM-dd', 'MM/dd/yy'],
+                'winner then remaining accepting candidates in table order');
+            assertEq(uc.reasons, ['mixedTemporalFormats', 'twoDigitYear'], 'both reasons for a cross-family yy winner');
+            assertN1(assert, onUnion.draft, 'union-yy-combined');
+
+            // B058: union-coverage observed.min/max use each participant's first accepting
+            // format in draft order, not a single shared format
+            const extremes = { headers: ['d'], rows: [['2026-07-15'], ['16.07.2026'], ['2026-01-02']] };
+            const onExtremes = TV().inferConfig(extremes, { allAcceptingFormats: true });
+            const ec = onExtremes.report.columns[0];
+            assertEq(ec.observed.min, '2026-01-02', 'min reported as the original extreme string');
+            assertEq(ec.observed.max, '16.07.2026', 'max reported as the original extreme string');
+            assertEq(onExtremes.draft.columns.d.type.formats, ['yyyy-MM-dd', 'dd.MM.yyyy'], 'winner + used candidate');
+        },
+    });
+
+    U.push({
+        suite, name: "long-tail: temporalDisabled:luxon -- ladder step 5 is skipped and reported when the temporal engine is unavailable",
+        fn: ({ assertEq }) => {
+            const saved = window.luxon;
+            window.luxon = undefined;
+            let r;
+            try {
+                r = TV().inferConfig({ headers: ['d'], rows: [['2026-07-15'], ['2026-07-16']] });
+            } finally {
+                window.luxon = saved;
+            }
+            assertEq(r.report.limitations, ['temporalDisabled:luxon'], 'limitation reported when Luxon is absent');
+            assertEq(r.report.columns[0].inferredType, 'string', 'temporal ladder step skipped -> falls to string');
+            assertEq(r.report.columns[0].confidence, 'fallback', 'honest fallback confidence');
+            assertEq(r.report.columns[0].reasons, ['numericLike'],
+                'the numericLike char-class check runs before temporalLike; dashes/digits satisfy it');
+            // sanity: restoring Luxon (only meaningful when this environment actually has it)
+            // brings back full temporal inference, proving the disabled state was not sticky
+            if (saved) {
+                const after = TV().inferConfig({ headers: ['d'], rows: [['2026-07-15'], ['2026-07-16']] });
+                assertEq(after.report.limitations, [], 'no limitation once Luxon is back');
+                assertEq(after.report.columns[0].inferredType, 'date', 'temporal inference restored');
+            }
+        },
+    });
+
+    U.push({
+        suite, name: 'long-tail: all 16 two-digit-year (yy) date candidates individually exercised',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            const table = [
+                { fmt: 'dd/MM/yy', rows: ['30/06/19', '01/12/20'] },     // already the ladder winner elsewhere; sanity-checked here too
+                { fmt: 'd/MM/yy', rows: ['1/01/19', '22/12/19'] },
+                { fmt: 'dd/M/yy', rows: ['25/6/19', '13/06/20'] },
+                { fmt: 'd/M/yy', rows: ['25/3/19', '6/11/20'] },
+                { fmt: 'MM/dd/yy', rows: ['06/25/19', '01/13/20'] },
+                { fmt: 'M/dd/yy', rows: ['6/25/19', '11/13/20'] },
+                { fmt: 'MM/d/yy', rows: ['06/3/19', '01/25/20'] },
+                { fmt: 'M/d/yy', rows: ['6/25/19', '11/4/20'] },
+                { fmt: 'dd.MM.yy', rows: ['30.06.19', '01.12.20'] },
+                { fmt: 'd.MM.yy', rows: ['1.07.19', '25.12.20'] },
+                { fmt: 'dd.M.yy', rows: ['25.7.19', '13.12.20'] },
+                { fmt: 'd.M.yy', rows: ['1.7.19', '23.11.20'] },
+                { fmt: 'dd-MM-yy', rows: ['30-06-19', '01-12-20'] },
+                { fmt: 'd-MM-yy', rows: ['1-07-19', '25-12-20'] },
+                { fmt: 'dd-M-yy', rows: ['25-7-19', '13-12-20'] },
+                { fmt: 'd-M-yy', rows: ['1-7-19', '23-11-20'] },
+            ];
+            for (const { fmt, rows: r } of table) {
+                const t = { headers: ['d'], rows: r.map((v) => [v]) };
+                const res = TV().inferConfig(t);
+                assertEq(res.report.columns[0].inferredType, 'date', `${fmt}: infers date`);
+                assertEq(res.report.columns[0].confidence, 'ambiguous', `${fmt}: every yy winner is ambiguous`);
+                assert(res.report.columns[0].reasons.includes('twoDigitYear'), `${fmt}: twoDigitYear reason present`);
+                assertEq(res.draft.columns.d.type.formats, [fmt], `${fmt}: drafted format`);
+                assert(TV().validate(res.draft, t).valid, `${fmt}: draft validates its own sample`);
+            }
+        },
+    });
+
+    U.push({
+        suite, name: 'long-tail: numeric-format candidates 3-5 (space/apostrophe grouping); bare-decimal candidates 7-10; negativeStyle candidates 12-15 and 17-20',
+        fn: ({ assert, assertEq }) => {
+            const numeric = [
+                { fmt: { decimalSeparator: ',', groupingSeparators: [' '] }, rows: ['1 234,50', '2 345,10'] },
+                { fmt: { decimalSeparator: '.', groupingSeparators: [' '] }, rows: ['1 234.50', '2 345.10'] },
+                { fmt: { decimalSeparator: '.', groupingSeparators: ["'"] }, rows: ["1'234.50", "2'345.10"] },
+            ];
+            const bare = [
+                { fmt: { decimalSeparator: ',', groupingSeparators: ['.'], allowBareDecimal: true }, rows: ['1.234,50', ',85'] },
+                { fmt: { decimalSeparator: ',', groupingSeparators: [' '], allowBareDecimal: true }, rows: ['1 234,50', ',85'] },
+                { fmt: { decimalSeparator: '.', groupingSeparators: [' '], allowBareDecimal: true }, rows: ['1 234.50', '.85'] },
+                { fmt: { decimalSeparator: '.', groupingSeparators: ["'"], allowBareDecimal: true }, rows: ["1'234.50", '.85'] },
+            ];
+            const negative = [
+                { fmt: { decimalSeparator: ',', groupingSeparators: ['.'], negativeStyle: 'parentheses' }, rows: ['(1.234,50)', '12,00'] },
+                { fmt: { decimalSeparator: ',', groupingSeparators: [' '], negativeStyle: 'parentheses' }, rows: ['(1 234,50)', '12,00'] },
+                { fmt: { decimalSeparator: '.', groupingSeparators: [' '], negativeStyle: 'parentheses' }, rows: ['(1 234.50)', '12.00'] },
+                { fmt: { decimalSeparator: '.', groupingSeparators: ["'"], negativeStyle: 'parentheses' }, rows: ["(1'234.50)", '12.00'] },
+                { fmt: { decimalSeparator: ',', groupingSeparators: ['.'], negativeStyle: 'trailingMinus' }, rows: ['1.234,50-', '12,00'] },
+                { fmt: { decimalSeparator: ',', groupingSeparators: [' '], negativeStyle: 'trailingMinus' }, rows: ['1 234,50-', '12,00'] },
+                { fmt: { decimalSeparator: '.', groupingSeparators: [' '], negativeStyle: 'trailingMinus' }, rows: ['1 234.50-', '12.00'] },
+                { fmt: { decimalSeparator: '.', groupingSeparators: ["'"], negativeStyle: 'trailingMinus' }, rows: ["1'234.50-", '12.00'] },
+            ];
+            for (const { fmt, rows: r } of numeric.concat(bare, negative)) {
+                const t = { headers: ['v'], rows: r.map((v) => [v]) };
+                const res = TV().inferConfig(t);
+                assertEq(res.report.columns[0].inferredType, 'float', `${JSON.stringify(fmt)}: infers float`);
+                assertEq(res.report.columns[0].confidence, 'high', `${JSON.stringify(fmt)}: unambiguous`);
+                assertEq(res.draft.columns.v.type.formats, [fmt], `${JSON.stringify(fmt)}: drafted NumberFormat`);
+                assert(TV().validate(res.draft, t).valid, `${JSON.stringify(fmt)}: draft validates its own sample`);
+            }
+        },
+    });
+
+    U.push({
+        suite, name: 'long-tail: 9 of the 13 datetime candidates; 9 of the 21 yyyy-family date candidates',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            const datetime = [
+                { fmt: 'yyyy-MM-dd HH:mm:ss', rows: ['2026-07-15 14:30:45', '2026-07-16 09:00:12'] },
+                { fmt: "yyyy-MM-dd'T'HH:mm:ss.SSS", rows: ['2026-07-15T14:30:45.123', '2026-07-16T09:00:12.000'] },
+                { fmt: "yyyy-MM-dd'T'HH:mm:ssZZ", rows: ['2026-07-15T14:30:45+02:00', '2026-07-16T09:00:12+00:00'] },
+                { fmt: "yyyy-MM-dd'T'HH:mm:ss.SSSZZ", rows: ['2026-07-15T14:30:45.123+02:00', '2026-07-16T09:00:12.000+00:00'] },
+                { fmt: 'dd.MM.yyyy HH:mm:ss', rows: ['15.07.2026 14:30:45', '16.07.2026 09:00:12'] },
+                { fmt: 'dd.MM.yyyy HH:mm', rows: ['15.07.2026 14:30', '16.07.2026 09:05'] },
+                { fmt: 'MM/dd/yyyy HH:mm', rows: ['06/25/2026 14:30', '01/13/2026 09:05'] },
+                { fmt: "yyyy-MM-dd'T'HH:mm", rows: ['2026-07-15T14:30', '2026-07-16T09:05'] },
+                { fmt: "yyyy-MM-dd'T'HH:mm:ss.SSSSSS", rows: ['2026-07-15T14:30:45.123456', '2026-07-16T09:00:12.000001'] },
+            ];
+            for (const { fmt, rows: r } of datetime) {
+                const t = { headers: ['t'], rows: r.map((v) => [v]) };
+                const res = TV().inferConfig(t);
+                assertEq(res.report.columns[0].inferredType, 'datetime', `${fmt}: infers datetime`);
+                assertEq(res.report.columns[0].confidence, 'high', `${fmt}: unambiguous`);
+                assertEq(res.draft.columns.t.type.formats, [fmt], `${fmt}: drafted format`);
+                assert(TV().validate(res.draft, t).valid, `${fmt}: draft validates its own sample`);
+            }
+
+            const dateYyyy = [
+                { fmt: 'd.MM.yyyy', rows: ['1.07.2026', '25.12.2026'] },
+                { fmt: 'dd.M.yyyy', rows: ['25.7.2026', '13.12.2026'] },
+                { fmt: 'dd/M/yyyy', rows: ['25/07/2026', '13/2/2026'] },
+                { fmt: 'M/dd/yyyy', rows: ['7/25/2026', '11/13/2026'] },
+                { fmt: 'MM/d/yyyy', rows: ['06/25/2026', '11/4/2026'] },
+                { fmt: 'd-MM-yyyy', rows: ['1-07-2026', '25-12-2026'] },
+                { fmt: 'dd-M-yyyy', rows: ['25-7-2026', '13-12-2026'] },
+                { fmt: 'd-M-yyyy', rows: ['1-7-2026', '23-11-2026'] },
+                { fmt: 'yyyy/M/d', rows: ['2026/1/15', '2026/11/3'] },
+            ];
+            for (const { fmt, rows: r } of dateYyyy) {
+                const t = { headers: ['d'], rows: r.map((v) => [v]) };
+                const res = TV().inferConfig(t);
+                assertEq(res.report.columns[0].inferredType, 'date', `${fmt}: infers date`);
+                assertEq(res.report.columns[0].confidence, 'high', `${fmt}: unambiguous`);
+                assertEq(res.draft.columns.d.type.formats, [fmt], `${fmt}: drafted format`);
+                assert(TV().validate(res.draft, t).valid, `${fmt}: draft validates its own sample`);
+            }
+        },
+    });
+
+    U.push({
+        suite, name: 'long-tail: 1.3.0 null tokens na/none adopt; pre-1.3.0 tokens N/A, null, NULL, - adopt',
+        fn: ({ assert, assertEq }) => {
+            const naNone = TV().inferConfig({ headers: ['a'], rows: [['na'], ['none'], ['x']] });
+            assertEq(naNone.draft.nullHandling.nullEquivalents, ['', 'na', 'none'], 'both lowercase tokens adopted, candidate order');
+            assertEq(naNone.report.columns[0].observed.nullTokensSeen, { na: 1, none: 1 }, 'both counted');
+            assert(TV().validate(naNone.draft, { headers: ['a'], rows: [['na'], ['x']] }).valid, 'draft accepts the tokens');
+
+            const pre130 = TV().inferConfig({ headers: ['a'], rows: [['N/A'], ['null'], ['NULL'], ['-'], ['x']] });
+            assertEq(pre130.draft.nullHandling.nullEquivalents, ['', 'N/A', 'null', 'NULL', '-'],
+                'all four pre-1.3.0 tokens adopted, candidate order');
+            assertEq(pre130.report.columns[0].observed.nullTokensSeen, { 'N/A': 1, null: 1, NULL: 1, '-': 1 }, 'all four counted');
+            assert(TV().validate(pre130.draft, { headers: ['a'], rows: [['NULL'], ['x']] }).valid, 'draft accepts the tokens');
+        },
+    });
+
+    // ---------------- v1.4.0: Addendum C inference behaviors (P10) ----------------
+
+    U.push({
+        suite, name: 'B022: numeric-only bool alternative pins the reasons literal numericStringBoolAlternative',
+        fn: ({ assert, assertEq }) => {
+            const t = { headers: ['bin'], rows: rows(25, (i) => [i % 2 ? '1' : '0']) };
+            const { draft, report } = TV().inferConfig(t);
+            const c = report.columns[0];
+            assertEq(c.inferredType, 'int', 'numeric-only bool tokens do not infer bool');
+            assertEq(c.confidence, 'ambiguous', 'the bool alternative makes this ambiguous');
+            assertEq(c.reasons, ['numericStringBoolAlternative'], 'the reasons literal itself is pinned, not just alternatives/confidence');
+            assertEq(c.alternatives, [{ type: 'bool', formats: null, rank: 1 }], 'bool reading is the ranked alternative');
+            assertN1(assert, draft, 'numeric-bool-alt');
+            assert(TV().validate(draft, t).valid, 'the draft validates its own sample');
+        },
+    });
+
+    U.push({
+        suite, name: "B023: digit-date guard's native-integer arm (canonical(p) branch, not just string cells)",
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            // native (non-string) 8-digit numbers that are valid yyyyMMdd calendar dates
+            const t = { headers: ['d'], rows: [[20260715], [20260101], [20251231]] };
+            const { draft, report } = TV().inferConfig(t);
+            const c = report.columns[0];
+            assertEq(c.inferredType, 'int', 'ladder order unchanged -- int still wins for native numbers too');
+            assertEq(c.confidence, 'ambiguous', 'native-number participants still trip the guard');
+            assertEq(c.reasons, ['digitDate'], 'reason recorded for the native-integer arm');
+            assertEq(c.alternatives, [{ type: 'date', formats: ['yyyyMMdd'], rank: 1 }],
+                'the date reading is the rank-1 alternative, derived via canonical(p) rather than the raw string');
+            assertN1(assert, draft, 'digitDate-native');
+            assert(TV().validate(draft, t).valid, 'the draft validates its own sample');
+
+            // control: native 8-digit numbers that do NOT form a valid calendar date stay unguarded
+            const ids = TV().inferConfig({ headers: ['d'], rows: [[12345678], [87654321]] });
+            assertEq(ids.report.columns[0].confidence, 'high', 'non-date native 8-digit ids stay high');
+            assertEq(ids.report.columns[0].reasons, [], 'no false digitDate reason for native non-dates');
+            assertEq(ids.report.columns[0].alternatives, [], 'no false date alternative for native non-dates');
+
+            // mixed native numbers + strings in the same column: canonical(p) and the raw
+            // string both feed the same regex/Luxon check, so the guard still fires
+            const mixed = TV().inferConfig({ headers: ['d'], rows: [[20260715], ['20260101']] });
+            assertEq(mixed.report.columns[0].reasons, ['digitDate'], 'guard fires across mixed native/string participants');
+        },
+    });
+
+    U.push({
+        suite, name: 'B024: report-only tolerance suggestion formula (0.5 x 10^-maxPrecision) holds across precisions, not just one illustrative value',
+        fn: ({ assert, assertEq }) => {
+            const table = [
+                { p: 1, cells: ['1.2', '3.4'], suggested: 0.05 },
+                { p: 2, cells: ['1.22', '3.44'], suggested: 0.005 },
+                { p: 3, cells: ['1.222', '3.444'], suggested: 0.0005 },
+                { p: 4, cells: ['1.2222', '3.4444'], suggested: 0.00005 },
+            ];
+            for (const { p, cells, suggested } of table) {
+                const t = { headers: ['v'], rows: cells.map((v) => [v]) };
+                const { report } = TV().inferConfig(t);
+                assertEq(report.columns[0].observed.maxPrecision, p, `maxPrecision=${p}: observed precision matches the fixture`);
+                assertEq(report.suggestions.tolerances, [{ column: 'v', suggested, basis: `observedPrecision:${p}` }],
+                    `maxPrecision=${p}: suggested value and basis string both follow 0.5 x 10^-p`);
+            }
+        },
+    });
+
+    U.push({
+        suite, name: "B025: digit-date guard's own silent dependency on the temporal binding -- when Luxon is unavailable the guard no-ops (not just ladder step 5)",
+        fn: ({ assertEq }) => {
+            const saved = window.luxon;
+            window.luxon = undefined;
+            let r;
+            try {
+                // 8-digit yyyyMMdd-shaped strings that WOULD trip the digit-date guard if
+                // Luxon were present (see the 'digit-date guard' vector above, needsLuxon:true)
+                r = TV().inferConfig({ headers: ['d'], rows: [['20260715'], ['20260101'], ['20251231']] });
+            } finally {
+                window.luxon = saved;
+            }
+            assertEq(r.report.limitations, ['temporalDisabled:luxon'], 'limitation reported when Luxon is absent');
+            assertEq(r.report.columns[0].inferredType, 'int', 'plain int -- the guard depends on the same lux binding as ladder step 5');
+            assertEq(r.report.columns[0].confidence, 'high', 'no silent ambiguity: the guard cleanly no-ops rather than half-firing');
+            assertEq(r.report.columns[0].reasons, [], 'no digitDate reason without the temporal engine');
+            assertEq(r.report.columns[0].alternatives, [], 'no date alternative without the temporal engine');
+        },
+    });
+
+    U.push({
+        suite, name: 'B026: allAcceptingFormats union-coverage within-family reduction at unequal per-participant accept counts',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            // '1/07/2026' accepts the whole day-month slash family (d/MM, dd/MM, d/M, dd/M
+            // all read day=1); '22/12/2026' only accepts the dd/MM-shaped members (day=22
+            // rules out single-digit-day formats); the slash family therefore reduces to
+            // its sole common survivor d/MM/yyyy at count 2. '15.07.2026' is a distinct
+            // dotted family, reducing independently to dd.MM.yyyy at count 1. A genuine
+            // cross-family reading (M/dd/yyyy, day=7/month=15 impossible so this is really
+            // testing the union set, not a fourth candidate) is exercised by the existing
+            // allAcceptingFormats vector; this vector isolates the within-family count-based
+            // reduction the union path applies before ranking.
+            const t = { headers: ['d'], rows: [['1/07/2026'], ['22/12/2026'], ['15.07.2026']] };
+            const { draft, report } = TV().inferConfig(t, { allAcceptingFormats: true });
+            const c = report.columns[0];
+            assertEq(c.inferredType, 'date', 'union coverage still infers date');
+            assertEq(c.confidence, 'ambiguous', 'union coverage across families is ambiguous');
+            assertEq(c.reasons, ['mixedTemporalFormats'], 'cross-family union reason');
+            assertEq(draft.columns.d.type.formats, ['d/MM/yyyy', 'dd.MM.yyyy', 'M/dd/yyyy'],
+                'winner (highest accepted count) then remaining used candidates in table order -- ' +
+                'the slash family reduced to its sole survivor, not left with redundant generalizations');
+            assertEq(c.alternatives, [
+                { type: 'date', formats: ['dd.MM.yyyy'], rank: 1 },
+                { type: 'date', formats: ['M/dd/yyyy'], rank: 2 },
+            ], 'ranked alternatives reflect the reduced union set, ranked by accepted count');
+            assertN1(assert, draft, 'union-family-reduction');
+            assert(TV().validate(draft, t).valid, 'the draft validates its own sample');
+        },
+    });
+
 })();

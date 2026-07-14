@@ -66,7 +66,12 @@
     // ---------------- 2. builder build → rebuild identity over random valid configs ----------------
 
     function randomConfig(rnd) {
-        const types = ['string', 'int', 'float', 'bool', 'categorical', 'skip'];
+        const types = ['string', 'int', 'float', 'bool', 'categorical', 'skip', 'date', 'datetime', 'time'];
+        const TEMPORAL_FORMATS = {
+            date: ['yyyy-MM-dd', 'yy-MM-dd'],
+            datetime: ['yyyy-MM-dd HH:mm', 'yy-MM-dd HH:mm'],
+            time: ['HH:mm'],
+        };
         const cfg = {
             meta: { schemaVersion: '1.0.0', name: 'fz' + Math.floor(rnd() * 1e6) },
             columns: {},
@@ -83,6 +88,27 @@
             if (t === 'int' && rnd() < 0.5) col.type.value = { min: -100, max: 100 + Math.floor(rnd() * 100), minInclusive: true, maxInclusive: true };
             if (t === 'float' && rnd() < 0.4) col.type.precision = { min: 0, max: 2 + Math.floor(rnd() * 4), minInclusive: true, maxInclusive: true };
             if (t === 'categorical') col.type.allowedValues = ['A', 'B', 'C'].slice(0, 1 + Math.floor(rnd() * 3));
+            // 1.3.0 NumberFormat union on numerics: negativeStyle / pattern / allowBareDecimal
+            // (each round-trips through build→rebuild; grouping/decimal separators are declared so
+            //  a chosen pattern only ever uses the four allowed symbols — see rule 12)
+            if ((t === 'int' || t === 'float') && rnd() < 0.4) {
+                const fmt = { decimalSeparator: '.', groupingSeparators: [','] };
+                const k = rnd();
+                if (k < 0.34) {
+                    fmt.negativeStyle = pick(rnd, ['leadingSign', 'parentheses', 'trailingMinus']);
+                } else if (k < 0.67) {
+                    fmt.pattern = pick(rnd, t === 'int' ? ['#,##0', '000', '###'] : ['#,##0.00', '0.00', '###']);
+                } else {
+                    fmt.groupingSeparators = [];
+                    fmt.allowBareDecimal = rnd() < 0.5;
+                }
+                col.type.formats = [fmt];
+            }
+            // temporal columns carry a format list; date/datetime may pin a column-level pivot
+            if (t === 'date' || t === 'datetime' || t === 'time') {
+                col.type.formats = [pick(rnd, TEMPORAL_FORMATS[t])];
+                if (t !== 'time' && rnd() < 0.4) col.evaluation = { twoDigitYearPivot: 1000 + Math.floor(rnd() * 8900) };
+            }
             cfg.columns['c' + i] = col;
         }
         if (rnd() < 0.4) {
@@ -90,7 +116,11 @@
             if (rnd() < 0.5) cfg.resultConfig.collectCellRegister = rnd() < 0.5;
         }
         if (rnd() < 0.4) cfg.nullHandling = { nullEquivalents: ['', 'NA'].slice(0, 1 + Math.floor(rnd() * 2)) };
-        if (rnd() < 0.4) cfg.evaluation = { strictType: rnd() < 0.5, timezone: 'utc' };
+        if (rnd() < 0.4) {
+            cfg.evaluation = { strictType: rnd() < 0.5, timezone: 'utc' };
+            // 1.3.0 table-level two-digit-year pivot (range [1000, 9899])
+            if (rnd() < 0.5) cfg.evaluation.twoDigitYearPivot = 1000 + Math.floor(rnd() * 8900);
+        }
         if (rnd() < 0.3) {
             cfg.structure = { allowExtraColumns: rnd() < 0.5, allowMissingColumns: rnd() < 0.5 };
         }
@@ -108,6 +138,7 @@
 
     U.push({
         suite, name: 'builder: build → rebuild round-trip identity over random valid configs',
+        needsLuxon: true,   // generated configs include temporal columns (engine validate needs Luxon)
         fn: ({ assert }) => {
             for (let seed = 1; seed <= 30; seed++) {
                 const rnd = prng(seed * 104729);
@@ -132,7 +163,7 @@
             const CELLS = ['x', '1', '2.5', '1,5', 'true', 'no', 'NA', '', null, 7, 2.25, true, false,
                 'AB-1', '2026-07-01', '01.07.2026', '12:30', '👍', '  pad ', '-', 'NULL', '1e5', '0', NaN,
                 '30/06/19', '(1,234.50)', '1234.50-', '007', '#N/A', 'None', '--', '1.234', '9:05',
-                '9007199254740993', '2026-07-15 14:30'];
+                '9007199254740993', '2026-07-15 14:30', '.85', '-.5'];
             for (let seed = 1; seed <= 25; seed++) {
                 const rnd = prng(seed * 65537);
                 const cols = 1 + Math.floor(rnd() * 6);

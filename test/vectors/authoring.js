@@ -104,6 +104,17 @@
                 fields: { amount: { tolerance: { fn: 'tol1' } } },
             });
             assertEq(b2.validate().deferred, ['C5'], 'tolerance fn defers as C5');
+            // B120: row-level diffChecks custom fn defers under its own id, C8
+            const b3 = TV().createConfigBuilder(cleanSchema()).setComparison({
+                match: { keys: ['id'] },
+                diffChecks: { row: [{ name: 'd1', type: 'custom', fn: 'diff1' }] },
+            });
+            assertEq(b3.validate().deferred, ['C8'], 'diffCheck custom fn defers as C8');
+            assert(b3.validate().valid, 'deferred C8 does not fail validation');
+            assert(b3.validate({ functions: { diff1: () => [] } }).valid, 'registry with fn → checkable and valid');
+            const missDiff = b3.validate({ functions: {} });
+            assert(!missDiff.valid && missDiff.deferred.length === 0,
+                'registry without the fn → real C8 error, not deferred');
         },
     });
 
@@ -270,6 +281,63 @@
             const rp2 = TV().createConfigBuilder(s2).resolvedPreview();
             assertEq(rp2.columns.d.evaluation.twoDigitYearPivot, 1930, 'column pivot preserved');
             assertEq(rp2.columns.d.evaluation.strictType, true, 'strictType still resolved alongside');
+        },
+    });
+
+    // ---------------- v1.4.0 P8: doc-anchored gaps (B110, B114) ----------------
+
+    U.push({
+        suite, name: 'builder default seed matches Addendum A.6 (schemaVersion tracks SPEC_VERSION)',
+        fn: ({ assert, assertEq }) => {
+            const b = TV().createConfigBuilder();
+            const built = b.build();
+            // A.6's literal example pins schemaVersion to the version it was written against;
+            // the seed itself derives it from SPEC_VERSION (rule M4) so it never goes stale.
+            assertEq(built, { meta: { schemaVersion: TV().SPEC_VERSION, name: '' }, columns: {} },
+                'no-arg build() ≡ Addendum A.6 seed literal');
+            // A.6: "intentionally invalid so validate() guides completion"
+            const v = b.validate();
+            assert(!v.valid, 'default seed is intentionally invalid');
+            const paths = v.errors.map((e) => e.path);
+            assert(paths.includes('meta.name'), 'empty name flagged');
+            assert(paths.includes('columns'), 'empty columns flagged');
+        },
+    });
+
+    U.push({
+        suite, name: 'configModel: every dependsOn/relevantWhen predicate is well-formed and resolves (rules M3, M5)',
+        fn: ({ assert, assertEq }) => {
+            const m = TV().configModel;
+            const VALID_OPS = ['eq', 'neq', 'in', 'notIn', 'null', 'nonNull'];
+            const NO_VALUE_OPS = ['null', 'nonNull'];
+            // placeholders (<name>, <col>, ...) and array markers ([], [0]) denote "any instance";
+            // #effective reads the resolved value of the same-named authored setting (§A.2).
+            const normalize = (p) => p.replace(/#effective$/, '').replace(/<[^>]+>/g, '<*>').replace(/\[[^\]]*\]/g, '[]');
+            const normSet = new Set(m.settings.map((s) => normalize(s.path)));
+
+            let leafCount = 0;
+            const walk = (node, from, kind) => {
+                if (node == null) return;
+                if (Array.isArray(node.all)) { node.all.forEach((n) => walk(n, from, kind)); return; }
+                if (Array.isArray(node.any)) { node.any.forEach((n) => walk(n, from, kind)); return; }
+                if (node.not) { walk(node.not, from, kind); return; }
+                leafCount++;
+                assert(typeof node.path === 'string', `${from} ${kind}: leaf has a string path`);
+                assert(VALID_OPS.includes(node.op), `${from} ${kind}: op '${node.op}' is in the §A.2 grammar`);
+                if (NO_VALUE_OPS.includes(node.op)) {
+                    assert(!('value' in node), `${from} ${kind}: '${node.op}' carries no value`);
+                } else {
+                    assert('value' in node, `${from} ${kind}: '${node.op}' carries a value`);
+                }
+                assert(normSet.has(normalize(node.path)), `${from} ${kind}: path '${node.path}' resolves (rule M5, no dangling scope)`);
+            };
+            for (const s of m.settings) {
+                walk(s.relevantWhen, s.path, 'relevantWhen');
+                if (Array.isArray(s.dependsOn)) {
+                    for (const d of s.dependsOn) walk(d.predicate, s.path, 'dependsOn');
+                }
+            }
+            assert(leafCount >= 40, `walked a substantial number of leaf predicates (got ${leafCount})`);
         },
     });
 })();

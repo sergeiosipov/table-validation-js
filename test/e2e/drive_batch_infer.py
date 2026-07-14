@@ -4,15 +4,50 @@ verify per-file outcomes, download the ZIP and validate its contents (configs pa
 are authoring-valid drafts, manifest names every input incl. failures); then the
 folder picker over docs/examples. The page loads its engine from the pinned CDN tag,
 so this drive needs network. Usage: drive_batch_infer.py [chromium|firefox|webkit]"""
+import html as _html
 import io
 import json
 import pathlib
+import re
 import sys
 import tempfile
 import zipfile
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from playwright.sync_api import sync_playwright
+
+
+# ---- minimal OOXML readback (no ExcelJS in Python): resolve a Summary row's
+# top-frequency cells (columns past the metadata block) into their string values.
+def shared_strings(xml):
+    out = []
+    for si in re.findall(r"<si>(.*?)</si>", xml, re.S):
+        ts = re.findall(r"<t[^>]*>(.*?)</t>", si, re.S)
+        out.append(_html.unescape("".join(ts)))
+    return out
+
+
+def _col_to_idx(col):  # 'A' -> 1, 'L' -> 12
+    n = 0
+    for ch in col:
+        n = n * 26 + (ord(ch) - 64)
+    return n
+
+
+def row_topfreq(sheetxml, r, shared, meta_cols):
+    m = re.search(r'<row r="%d"[^>]*>(.*?)</row>' % r, sheetxml, re.S)
+    if not m:
+        return []
+    vals = []
+    for cm in re.finditer(r'<c r="([A-Z]+)%d"([^>]*)>(.*?)</c>' % r, m.group(1), re.S):
+        col, attrs, inner = cm.group(1), cm.group(2), cm.group(3)
+        if _col_to_idx(col) <= meta_cols:
+            continue
+        vm = re.search(r"<v>(.*?)</v>", inner, re.S)
+        if not vm:
+            continue
+        vals.append(shared[int(vm.group(1))] if 't="s"' in attrs else _html.unescape(vm.group(1)))
+    return vals
 
 repo = pathlib.Path(__file__).resolve().parents[2]
 url = (repo / "batch-infer-standalone.html").as_uri()
@@ -28,6 +63,9 @@ tmp = pathlib.Path(tempfile.mkdtemp(prefix="tv-batch-"))
     '[{"sku":"A-1","qty":5},{"sku":"A-2","qty":7},{"sku":"A-3","qty":null}]', encoding="utf-8")
 (tmp / "notes.md").write_text("# not a table\n", encoding="utf-8")
 (tmp / "broken.xlsx").write_bytes(b"this is not a zip container")
+# a hidden dotfile must be listed as skipped (never silently dropped) — pins the
+# v1.3.1 batch hidden-file rule (B035)
+(tmp / ".DS_Store").write_bytes(b"\x00\x00\x00\x00")
 
 with sync_playwright() as p:
     browser = getattr(p, browser_name).launch()
@@ -44,17 +82,23 @@ with sync_playwright() as p:
 
     # ---- multi-file pick: mixed outcomes
     page.set_input_files("#inFiles", [str(tmp / n) for n in
-                                      ["clean.csv", "records.json", "notes.md", "broken.xlsx"]])
+                                      ["clean.csv", "records.json", "notes.md", "broken.xlsx", ".DS_Store"]])
     page.wait_for_timeout(200)
     page.click("#run")
     page.wait_for_function("() => document.getElementById('progress').textContent.startsWith('done')",
                            timeout=60000)
-    st = {e["relPath"]: e["status"] for e in page.evaluate(
-        "() => window.__tvbatch.entries().map((e) => ({relPath: e.relPath, status: e.status}))")}
-    assert st == {"broken.xlsx": "failed", "clean.csv": "ok", "notes.md": "unsupported",
-                  "records.json": "ok"}, f"statuses: {st}"
+    ent = {e["relPath"]: e for e in page.evaluate(
+        "() => window.__tvbatch.entries().map((e) => ({relPath: e.relPath, status: e.status, reason: e.reason}))")}
+    st = {k: v["status"] for k, v in ent.items()}
+    assert st == {".DS_Store": "unsupported", "broken.xlsx": "failed", "clean.csv": "ok",
+                  "notes.md": "unsupported", "records.json": "ok"}, f"statuses: {st}"
+    # B035: the dotfile is skipped for being hidden — distinct reason from an unsupported
+    # extension, and it is listed (never silently dropped)
+    assert ent[".DS_Store"]["reason"] == "hidden file (dotfile)", f"dotfile reason: {ent['.DS_Store']['reason']}"
+    assert ent["notes.md"]["reason"] == "unsupported extension", f"notes.md reason: {ent['notes.md']['reason']}"
     body = page.inner_text("#rows")
     assert "authoring-valid" in body and "formatMismatch" in body and "skipped" in body, body[:300]
+    assert "skipped — hidden file (dotfile)" in body, "hidden-file skip row not rendered"
     # records.json must have gone through the jsonObjects path (records → intrinsic headers)
     draft = page.evaluate("() => window.__tvbatch.entries().find((e) => e.relPath === 'records.json').draft")
     assert set(draft["columns"]) == {"sku", "qty"}, f"jsonObjects columns: {list(draft['columns'])}"
@@ -127,6 +171,40 @@ with sync_playwright() as p:
     assert "/" in rel, f"folder pick should carry relative paths: {rel}"
     print(f"[{browser_name}] folder mode: examples folder → 2 inferred, 1 failed (json object), "
           f"relative paths preserved")
+
+    # ---- B035: Summary-sheet micro-claims (full-column frequency, first-seen tie order,
+    # 80-char truncation, bold/filled header). A dedicated single-file pick makes the exact
+    # top-frequency ordering deterministic without disturbing the earlier sections.
+    LONG = "x" * 85
+    (tmp / "freq.csv").write_text(
+        "grade,note\nA," + LONG + "\nA," + LONG + "\nY," + LONG + "\nX," + LONG + "\n",
+        encoding="utf-8")
+    page.set_input_files("#inFiles", [str(tmp / "freq.csv")])
+    page.wait_for_timeout(200)
+    page.click("#run")
+    page.wait_for_function("() => document.getElementById('progress').textContent.startsWith('done')",
+                           timeout=60000)
+    with page.expect_download() as dl:
+        page.click("#xlsx")
+    fpath = tmp / "freq.xlsx"
+    dl.value.save_as(str(fpath))
+    fx = zipfile.ZipFile(fpath)
+    shared = shared_strings(fx.read("xl/sharedStrings.xml").decode("utf-8"))
+    sheet1 = fx.read("xl/worksheets/sheet1.xml").decode("utf-8")  # Summary is first
+    # Summary rows: row1 header, row2 = grade column, row3 = note column. SUM_META has 11 cols.
+    grade_top = row_topfreq(sheet1, 2, shared, 11)
+    # A occurs twice (frequency winner); Y and X tie at 1 and keep FIRST-SEEN order (Y before X,
+    # which is NOT alphabetical) — pins full-column frequency + stable tie order at once.
+    assert grade_top[:3] == ["A", "Y", "X"], f"frequency winner / first-seen tie order wrong: {grade_top}"
+    note_top = row_topfreq(sheet1, 3, shared, 11)
+    trunc = "x" * 79 + "…"
+    assert note_top and note_top[0] == trunc, f"80-char truncation wrong: {note_top[:1]!r}"
+    # bold + tinted Summary header land in styles.xml
+    styles = fx.read("xl/styles.xml").decode("utf-8")
+    assert "<b/>" in styles, "Summary header bold font missing from styles.xml"
+    assert "FFEAEEF2" in styles, "Summary header fill colour missing from styles.xml"
+    print(f"[{browser_name}] Summary micro-claims: winner+first-seen ties {grade_top[:3]}, "
+          f"80-char truncation, bold/filled header verified")
 
     browser.close()
 

@@ -137,6 +137,89 @@ function checkDefaultsTables(TV) {
     return { errs, checked };
 }
 
+// ---- §11 Settings Reference: enum + required byte-match configModel (B129, A.1 M2) ------
+//
+// checkDefaultsTables above only diffs the `default` cell of the §12/§15.12 tables. This
+// walks §11 ("Settings Reference") instead, extracting the `**Default**: required` marker
+// and any closed `**Valid**: "a", "b", ...` enum list from each `#### \`path\`` entry, and
+// cross-checks both against configModel's `required` and `enum` fields — the two M2 facets
+// checkDefaultsTables cannot see (a doc row it never reads).
+
+// §11 headers this mapping cannot check (not a single leaf descriptor) — mirrors the
+// EXPECTED_UNMAPPED convention in checkDefaultsTables (no silent caps).
+const SS11_EXPECTED_UNMAPPED = new Set([
+    'structure.severities',   // per-structural-rule key set (rule 55); model uses structure.severities.<rule>
+]);
+
+function checkSettingsReference(TV) {
+    const errs = [];
+    const specPath = coreSpecPath();
+    if (!specPath) throw new Error('core spec not found (repo root, $TV_SPEC_DIR, or ../table-validation-spec)');
+    const core = fs.readFileSync(specPath, 'utf8');
+    const model = new Map();
+    for (const s of TV.configModel.settings) {
+        model.set(s.path + '|' + s.section, s);
+        if (!model.has(s.path)) model.set(s.path, s);
+    }
+    const lookup = (p, sec) => model.get(sec ? p + '|' + sec : p) || model.get(p);
+
+    const sec11 = core.split('## 11. Settings Reference')[1].split('\n## 12.')[0];
+
+    // split the section into one block per `#### \`path\`` header
+    const headerRe = /^#### (`[^\n]+)$/gm;
+    const positions = [];
+    let hm;
+    while ((hm = headerRe.exec(sec11)) !== null) positions.push({ idx: hm.index, header: hm[1] });
+    if (positions.length < 40) errs.push(`only ${positions.length} §11 setting headers found — the section parser is likely broken`);
+
+    const unmapped = [];
+    let checkedRequired = 0;
+    let checkedEnum = 0;
+
+    for (let i = 0; i < positions.length; i++) {
+        const body = sec11.slice(positions[i].idx, i + 1 < positions.length ? positions[i + 1].idx : sec11.length);
+        // a header may name several sibling paths: `bool.trueValues` / `bool.falseValues`
+        const paths = [...positions[i].header.matchAll(/`([^`]+)`/g)].map((mm) => mm[1]);
+        const typeLine = /^- \*\*Type\*\*:.*$/m.exec(body);
+        if (!typeLine) { errs.push(`§11 ${positions[i].header}: no "- **Type**:" bullet found`); continue; }
+        const line = typeLine[0];
+        const defMatch = /\*\*Default[s]?\*\*:\s*([^·]+?)\s*(?:·|$)/.exec(line);
+        const validMatch = /\*\*Valid\*\*:\s*([^·]+?)\s*(?:·|$)/.exec(line);
+        const docRequired = defMatch !== null && defMatch[1].trim() === 'required';
+        const validText = validMatch ? validMatch[1].trim() : null;
+        const enumVals = validText ? [...validText.matchAll(/"([^"]*)"/g)].map((mm) => mm[1]) : [];
+
+        for (const p of paths) {
+            const target = mapDocPath(p);
+            const desc = lookup(target.path, target.section);
+            if (!desc) {
+                if (!SS11_EXPECTED_UNMAPPED.has(p)) unmapped.push(p);
+                continue;
+            }
+            checkedRequired++;
+            if (desc.required !== docRequired) {
+                errs.push(`§11 ${p}: doc Default=${docRequired ? 'required' : 'not required'}, configModel required=${desc.required}`);
+            }
+            if (desc.type === 'enum') {
+                checkedEnum++;
+                if (enumVals.length >= 2) {
+                    const a = JSON.stringify(enumVals.slice().sort());
+                    const b = JSON.stringify((desc.enum || []).slice().sort());
+                    if (a !== b) {
+                        errs.push(`§11 ${p}: doc Valid enum ${JSON.stringify(enumVals)} ≠ configModel enum ${JSON.stringify(desc.enum)}`);
+                    }
+                } else {
+                    errs.push(`§11 ${p}: configModel is enum type ${JSON.stringify(desc.enum)} but no closed "Valid" enum list found in the doc row`);
+                }
+            }
+        }
+    }
+    for (const u of unmapped) errs.push(`§11 setting row has no configModel mapping: ${u}`);
+    if (checkedRequired < 60) errs.push(`only ${checkedRequired} §11 required-flags checked — the section parser is likely broken`);
+    if (checkedEnum < 5) errs.push(`only ${checkedEnum} §11 enum settings checked — the section parser is likely broken`);
+    return { errs, checkedRequired, checkedEnum };
+}
+
 // ---- JS profile §8 usage examples, executed verbatim ------------------------------
 
 function runUsageExamples(TV) {
@@ -197,4 +280,4 @@ function runUsageExamples(TV) {
     return { errs, blocks: blocks.length };
 }
 
-module.exports = { checkDefaultsTables, runUsageExamples, coreSpecPath };
+module.exports = { checkDefaultsTables, checkSettingsReference, runUsageExamples, coreSpecPath };

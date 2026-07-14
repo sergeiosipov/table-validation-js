@@ -105,6 +105,13 @@ Every vector also runs through the purity harness (inputs deep-frozen) and the d
 | Docs-as-tests: Core §12/§15.12 defaults tables parsed from markdown and diffed against `configModel` (rule M2); JS profile §8 examples executed verbatim | [docs-tests.js](docs-tests.js) — via node-runner.js |
 | Release gate: version consistency everywhere, markdown anchors/links resolve, COVERAGE completeness, SRI hashes | [release-check.js](release-check.js) |
 
+## Console (UI architecture v1.3.0)
+
+| Requirement | Covering test file |
+|---|---|
+| Example→NumberFormat compiler (UI arch §5: preview-before-commit, dual-reading ambiguous compile): plain integer, ambiguous `1.234` two-format `ambiguous:true`, unambiguous two-separator European/US/apostrophe, bare decimal → `allowBareDecimal`, grouping-only integer, `parentheses`/`trailingMinus` negativeStyle, and the error branches (empty, too-many-separators, mid-string sign, grouping-not-in-threes). `compileNumberExample` is loaded DOM-free from `console/ui.js` into the headless harness | [vectors/console-compiler.js](vectors/console-compiler.js) |
+| Console `+ example` button appends the compiled format to a column's `NumberFormat[]` array (never silently); dotted/bracketed inferred column-name guardrail warning after inference accept | [e2e/drive_console.py](e2e/drive_console.py) |
+
 ## Platform suites (JS profile §1/§2/§3.14/§9)
 
 | Requirement | Covering artifact |
