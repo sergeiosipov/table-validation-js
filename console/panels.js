@@ -673,6 +673,89 @@
 
     // ---------------- Comparison panel (§5) ----------------
 
+    // §15.8 ToleranceSpec editor — the four forms (absolute number | {field, from} |
+    // {percent, of} | {fn}) as a form selector plus the chosen form's inputs, matching the
+    // panel's compound-control convention (cf. rangeControl/smsControl) rather than raw JSON.
+    // Rule C4 gates tolerance to int/float columns; referenced columns (field, of) must be
+    // numeric per rule C5. The {fn} form carries the Advanced-mode deferral hint (rule C5),
+    // matching the diff-checks pattern.
+    const TOL_FORMS = [
+        ['', '(none)'],
+        ['absolute', 'absolute (number)'],
+        ['field', 'per-row field'],
+        ['percent', 'relative percent'],
+        ['fn', 'custom fn'],
+    ];
+    function toleranceForm(v) {
+        if (v === undefined || v === null) return '';
+        if (typeof v === 'number') return 'absolute';
+        if (v && typeof v === 'object') {
+            if (v.fn !== undefined) return 'fn';
+            if (v.percent !== undefined) return 'percent';
+            if (v.field !== undefined) return 'field';
+        }
+        return '';
+    }
+
+    function toleranceCell(store, base, numericCols) {
+        const path = `${base}.tolerance`;
+        const cur = store.state.authoring.builder.get(path);
+        const form = toleranceForm(cur);
+        const edit = (v) => store.dispatch.edit(path, v);
+        const numCol0 = numericCols[0] || '';
+
+        const selector = h('select', {
+            title: 'ToleranceSpec form (Core §15.8)',
+            onchange: (e) => {
+                switch (e.target.value) {
+                    case '': edit(undefined); break;
+                    case 'absolute': edit(typeof cur === 'number' ? cur : 0); break;
+                    case 'field': edit({ field: (cur && cur.field) || numCol0, from: (cur && cur.from) || 'expected' }); break;
+                    case 'percent': edit({ percent: (cur && typeof cur.percent === 'number') ? cur.percent : 0, of: (cur && cur.of) || numCol0 }); break;
+                    case 'fn': edit({ fn: (cur && cur.fn) || '' }); break;
+                }
+            },
+        }, TOL_FORMS.map(([v, label]) => h('option', { value: v, selected: form === v }, label)));
+
+        const colSelect = (key) => h('select', {
+            title: 'referenced column — must exist and be numeric (rule C5)',
+            onchange: (e) => edit(Object.assign({}, cur, { [key]: e.target.value })),
+        }, numericCols.length
+            ? numericCols.map((c) => h('option', { value: c, selected: cur && cur[key] === c }, c))
+            : h('option', { value: '' }, '(no numeric column)'));
+
+        let body = null;
+        if (form === 'absolute') {
+            body = h('input', {
+                type: 'text', class: 'narrow', value: typeof cur === 'number' ? String(cur) : '',
+                placeholder: 'ε ≥ 0',
+                onchange: (e) => { const t = e.target.value.trim(); edit(t === '' ? undefined : (Number.isNaN(Number(t)) ? t : Number(t))); },
+            });
+        } else if (form === 'field') {
+            body = h('span', { class: 'inline-opts' },
+                'field ', colSelect('field'), ' from ',
+                h('select', {
+                    title: 'from — authoritative side supplying the per-row driving value (default expected)',
+                    onchange: (e) => edit(Object.assign({}, cur, { from: e.target.value })),
+                }, ['expected', 'produced'].map((o) => h('option', { value: o, selected: (cur && cur.from ? cur.from : 'expected') === o }, o))));
+        } else if (form === 'percent') {
+            body = h('span', { class: 'inline-opts' },
+                h('input', {
+                    type: 'text', class: 'narrow', value: typeof (cur && cur.percent) === 'number' ? String(cur.percent) : '',
+                    placeholder: '%',
+                    onchange: (e) => { const t = e.target.value.trim(); edit(Object.assign({}, cur, { percent: Number.isNaN(Number(t)) ? t : Number(t) })); },
+                }), '% of ', colSelect('of'));
+        } else if (form === 'fn') {
+            body = h('span', {},
+                h('input', {
+                    type: 'text', class: 'narrow', value: (cur && cur.fn) || '', placeholder: 'registered fn name',
+                    onchange: (e) => edit(Object.assign({}, cur, { fn: e.target.value.trim() })),
+                }),
+                h('div', { class: 'hint' }, 'A custom fn needs a function registry (rule C5). Paste the functions under Advanced mode (④ Run tab) to check and run them here, or run via the API; without Advanced mode the run blocks with a stated reason. The config exports fine either way.'));
+        }
+        return h('div', { class: 'tol-editor' }, selector, body);
+    }
+
     NS.ComparisonPanel = function (store) {
         const st = store.state;
         const on = st.authoring.comparisonEnabled;
@@ -730,10 +813,11 @@
 
         // per-field table (compare / presence / expectedName / tolerance / fuzzy) — §15.3 fields
         const typeOf = (c) => (doc.columns[c].type && doc.columns[c].type.name) || '?';
+        const numericCols = cols.filter((c) => ['int', 'float'].includes(typeOf(c)));
         const fieldsCard = h('div', { class: 'card' },
             h('div', { class: 'card-title' }, 'Per-column comparison options'),
             h('table', { class: 'grid' },
-                h('tr', {}, ['column', 'type', 'compare', 'presence', 'expected header (alias)', 'tolerance (number or ToleranceSpec JSON)', 'fuzzy threshold (string cols)'].map((c) => h('th', {}, c))),
+                h('tr', {}, ['column', 'type', 'compare', 'presence', 'expected header (alias)', 'tolerance (§15.8)', 'fuzzy threshold (string cols)'].map((c) => h('th', {}, c))),
                 cols.map((c) => {
                     const base = `comparison.fields.${c}`;
                     const get = (p) => b.get(p);
@@ -758,15 +842,7 @@
                                 store.dispatch.edit(`${base}.expectedName`, t === '' ? undefined : t);
                             },
                         })),
-                        h('td', {}, numeric ? h('input', {
-                            type: 'text', class: 'json', value: get(`${base}.tolerance`) === undefined ? '' : JSON.stringify(get(`${base}.tolerance`)),
-                            placeholder: 'e.g. 0.01 or {"percent":0.5,"of":"amount"}',
-                            onchange: (e) => {
-                                const t = e.target.value.trim();
-                                if (t === '') { store.dispatch.edit(`${base}.tolerance`, undefined); return; }
-                                try { store.dispatch.edit(`${base}.tolerance`, JSON.parse(t)); } catch (_) { /* keep */ }
-                            },
-                        }) : h('span', { class: 'hint' }, 'numeric only')),
+                        h('td', {}, numeric ? toleranceCell(store, base, numericCols) : h('span', { class: 'hint' }, 'numeric only')),
                         h('td', {}, isStr ? h('input', {
                             type: 'text', class: 'narrow', value: get(`${base}.fuzzy`) ? String(get(`${base}.fuzzy`).threshold) : '',
                             placeholder: 'e.g. 0.88',

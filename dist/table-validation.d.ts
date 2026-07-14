@@ -473,10 +473,37 @@ declare namespace TableValidation {
     // Ingestion module (Addendum §B, JS profile §3.12)
     // ================================================================
 
-    interface NormalizationStep {
-        fn: string;
-        params?: object | null;
-    }
+    /**
+     * Normalization step (Addendum §B.8) — a discriminated union over the built-in
+     * registry (`normalizationModel`): narrowing on `fn` narrows `params`. Built-ins
+     * whose params are all optional accept `params` absent or null; a built-in with
+     * required params makes `params` mandatory. Host-registered functions
+     * (IngestOptions.normalizationFunctions) sit outside this closed union — widen
+     * or cast such steps (their fn/params shapes are host-defined).
+     */
+    type NormalizationStep =
+        /** Strings: strip leading/trailing whitespace; collapse internal whitespace runs to one space (collapseInternal default true). */
+        | { fn: 'trim'; params?: { collapseInternal?: boolean } | null }
+        /** Strings: Unicode simple lowercase (default) or uppercase. */
+        | { fn: 'caseFold'; params?: { to?: 'lower' | 'upper' } | null }
+        /** A string exactly matching a listed equivalent becomes native null. `equivalents` must be non-empty. */
+        | { fn: 'nullCoerce'; params: { equivalents: string[] } }
+        /** A string interpretable under the NumberFormat becomes its canonical "."-decimal string (lexical precision preserved); otherwise unchanged. */
+        | { fn: 'reformatNumber'; params: { format: NumberFormat } }
+        /** A string parseable by a "from" format is re-rendered in the "to" format; otherwise unchanged. yy centuries map via twoDigitYearPivot — integer in [1000, 9899], default 1961 (§B.8, 1.3.0). Requires Luxon. */
+        | { fn: 'reformatTemporal'; params: { from: string[]; to: string; twoDigitYearPivot?: number } }
+        /** A string interpretable as a number (direct strict parse, or the given format) becomes a native number; otherwise unchanged. */
+        | { fn: 'promoteNumber'; params?: { format?: NumberFormat | null } | null }
+        /** A string matching a true/false list (after the match strategy) becomes a native boolean; otherwise unchanged. Defaults: trueValues ["true","1","yes"], falseValues ["false","0","no"], matchStrategy { caseSensitive: false, trim: true, stripSpaces: false }. */
+        | { fn: 'promoteBool'; params?: { trueValues?: string[]; falseValues?: string[]; matchStrategy?: StringMatchStrategy } | null }
+        /** Strings: remove at most one declared prefix and one suffix (longest match first) — currency symbols, %, units. At least one of prefixes/suffixes is required; alsoTrim defaults true. */
+        | { fn: 'stripAffix'; params:
+              | { prefixes: string[]; suffixes?: string[]; alsoTrim?: boolean }
+              | { prefixes?: string[]; suffixes: string[]; alsoTrim?: boolean } }
+        /** Exact substring substitution map (non-empty), applied left-to-right over map insertion order. */
+        | { fn: 'replaceChars'; params: { map: { [from: string]: string } } }
+        /** Per-column only (normalization.columns): an effectively-empty cell (null or a listed string; treatAsEmpty default [""]) takes the nearest non-empty value above it, top to bottom. */
+        | { fn: 'fillDown'; params?: { treatAsEmpty?: string[] } | null };
 
     interface NormalizationSpec {
         table?: NormalizationStep[];
@@ -594,7 +621,11 @@ declare namespace TableValidation {
         columns: InferenceReportColumn[];
         candidateKeys: string[];
         noSingleColumnKey: boolean;
-        suggestions: { tolerances: Array<{ column: string; suggested: number; basis: string }> };
+        suggestions: {
+            tolerances: Array<{ column: string; suggested: number; basis: string }>;
+            /** §C.7 (added in 1.4.0): unanimous-evidence NumberFormat `pattern` suggestions for int/float columns — report-only, never drafted. */
+            patterns: Array<{ column: string; suggested: string; basis: string }>;
+        };
         limitations: string[];
     }
 

@@ -129,6 +129,76 @@
     });
 
     U.push({
+        suite, name: 'allAcceptingFormats: numeric union coverage for mixed NumberFormat columns (§C.4 point 3)',
+        fn: ({ assert, assertEq }) => {
+            // no single candidate accepts BOTH spellings, but fmt0 (US .,) and fmt1 (EU ,.)
+            // jointly cover them — 2 participants each → most-accepting tie → table order wins
+            const mixed = { headers: ['amt'], rows: [['1,234.50'], ['1.234,50'], ['9,999.00'], ['8.888,00']] };
+            // option OFF → string fallback, exactly as today
+            const off = TV().inferConfig(mixed);
+            assertEq(off.report.columns[0].inferredType, 'string', 'default: mixed NumberFormats fall through to string');
+            assertEq(off.draft.columns.amt.type, { name: 'string' }, 'no formats drafted without the option');
+            // option ON → float via union coverage
+            const on = TV().inferConfig(mixed, { allAcceptingFormats: true });
+            const c = on.report.columns[0];
+            assertEq(c.inferredType, 'float', 'union coverage infers float (a participant carries a fractional part)');
+            assertEq(c.confidence, 'ambiguous', 'union coverage is ambiguous');
+            assertEq(c.reasons, ['mixedNumberFormats'], 'reason literal recorded');
+            assertEq(on.draft.columns.amt.type.formats,
+                [{ decimalSeparator: '.', groupingSeparators: [','] }, { decimalSeparator: ',', groupingSeparators: ['.'] }],
+                'winner (most-accepting; tie → table order) first, then remaining reduced candidates in table order');
+            assertEq(c.alternatives, [{ type: 'float', formats: [{ decimalSeparator: ',', groupingSeparators: ['.'] }], rank: 1 }],
+                'non-winning reduced formats are ranked alternatives');
+            // reduction: allowBareDecimal / negativeStyle generalizations that accept exactly
+            // the same participants as their strict twin are dropped (strict precedes twin)
+            assert(on.draft.columns.amt.type.formats.every((f) => f.allowBareDecimal === undefined && f.negativeStyle === undefined),
+                'reduction drops generalizations whose strict twin accepts the same participants');
+            // self-accepting invariant (§C.1): the multi-format draft validates its own sample
+            assertN1(assert, on.draft, 'numeric-union');
+            const run = TV().validate(on.draft, mixed);
+            assert(run.valid, 'mixed-format numeric column validates with the union-formats draft');
+            // an allowBareDecimal generalization is genuinely dropped when its strict twin
+            // covers the same participants: a bare participant (.85) is needed to keep one
+            const withBare = { headers: ['amt'], rows: [['1,234.50'], ['1.234,50'], ['.85']] };
+            const wb = TV().inferConfig(withBare, { allAcceptingFormats: true });
+            assert(wb.draft.columns.amt.type.formats.some((f) => f.allowBareDecimal === true),
+                'a bare-decimal participant keeps exactly the bare candidate that alone accepts it');
+            assertN1(assert, wb.draft, 'numeric-union-bare');
+            assert(TV().validate(wb.draft, withBare).valid, 'bare-inclusive union draft validates its sample');
+            // determinism
+            assert(JSON.stringify(TV().inferConfig(mixed, { allAcceptingFormats: true })) === JSON.stringify(on), 'deterministic');
+        },
+    });
+
+    U.push({
+        suite, name: 'report-only pattern suggestions (§C.7): unanimous k + all-or-none grouping; never drafted',
+        fn: ({ assert, assertEq }) => {
+            // money column: constant 2 decimals, no grouping → step-3 float → '0.00'
+            const money = { headers: ['amt'], rows: rows(6, (i) => [(i + 1) + '.00']) };
+            const m = TV().inferConfig(money);
+            assertEq(m.report.suggestions.patterns,
+                [{ column: 'amt', suggested: '0.00', basis: 'decimals:2,participants:6' }],
+                'constant 2-decimal ungrouped float → 0.00 with the winner decimal separator');
+            assertEq(m.draft.columns.amt.type.pattern, undefined, 'pattern is NEVER drafted');
+            // grouped column: step-4 float, winner ., group , → #,##0.00
+            const grouped = { headers: ['amt'], rows: [['1,234.50'], ['2,000.00'], ['9,876.25']] };
+            const g = TV().inferConfig(grouped);
+            assertEq(g.report.columns[0].inferredType, 'float', 'grouped decimals infer float via step 4');
+            assertEq(g.report.suggestions.patterns,
+                [{ column: 'amt', suggested: '#,##0.00', basis: 'decimals:2,grouping:3,participants:3' }],
+                'unanimous grouping + 2 decimals → #,##0.00 with the winner separators');
+            assertEq(g.draft.columns.amt.type.pattern, undefined, 'grouped draft carries no pattern');
+            // varying decimal-digit count → NO suggestion (a pattern any participant violates
+            // must never be suggested)
+            const varK = { headers: ['amt'], rows: [['1.5'], ['2.50'], ['3.125']] };
+            assertEq(TV().inferConfig(varK).report.suggestions.patterns, [], 'varying k → no suggestion');
+            // partial grouping (one grouped, one not) → NO suggestion
+            const partial = { headers: ['amt'], rows: [['1,234.50'], ['999.00']] };
+            assertEq(TV().inferConfig(partial).report.suggestions.patterns, [], 'partial grouping → no suggestion');
+        },
+    });
+
+    U.push({
         suite, name: 'null recognition: fixed candidate tokens adopted on observation; nullability',
         fn: ({ assert, assertEq }) => {
             const { draft, report } = TV().inferConfig({

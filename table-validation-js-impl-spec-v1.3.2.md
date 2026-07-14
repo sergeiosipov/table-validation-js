@@ -432,7 +432,7 @@ TableValidation.inferConfig(table, options?) → { draft, report }   // synchron
 
 ### 3.14 Worker Wrapper & Message Protocol
 
-`dist/table-validation-worker.js` is a small hand-authored **classic worker** script (CDN-fetchable from the same tag). It `importScripts('table-validation.js')` from its own directory at startup and proxies the four heavy entry points over `postMessage`.
+`dist/table-validation-worker.js` is a small hand-authored **classic worker** script (CDN-fetchable from the same tag). It `importScripts('table-validation.js')` from its own directory at startup and proxies the heavy entry points (the four engines plus the XLSX exporters) over `postMessage`.
 
 ```javascript
 const w = new Worker('https://cdn.jsdelivr.net/gh/<owner>/table-validation-js@v1.3.2/dist/table-validation-worker.js');
@@ -450,6 +450,11 @@ w.onmessage = (ev) => { /* ev.data = { id: 1, ok: true, result } */ };
 | `compare` | `[schema, produced, expected, options?]` | `ComparisonResult` |
 | `ingest` | `[source, ingestSpec, options?]` | `IngestResult` (`Blob`/`ArrayBuffer` sources are structured-clone-able) |
 | `inferConfig` | `[table, options?]` | `InferenceResult` |
+| `exportXlsx` | `[{ result, table, schema }]` | `Blob` |
+| `exportComparisonXlsx` | `[{ result, table, schema, expected }]` | `Blob` |
+| `exportAnnotatedXlsx` | `[{ result, table, schema }]` | `Blob` |
+
+The export ops require the ExcelJS global inside the worker: their dependency bundles (Luxon/ExcelJS) MUST be `importScripts`'ed into the worker by the consumer via `init` before use; when ExcelJS is absent the op rejects with the same `"ExcelJS global is required"` configuration error the main-thread exporters raise (`name`/`code`/`detail` shape). Returned `Blob`s are structured-clone-safe. The console deliberately does **not** route through these ops yet — it keeps exporting on the main thread (loading ExcelJS inside the worker is a separate SRI/CSP design fork, deferred).
 
 **Structured-clone safety.** Results are sanitized before posting: any non-plain object — e.g. a Luxon `DateTime` carried as an interpreted value in `cellObservations` or diff cells — is rendered to its ISO string (via `.toISO()`) or a `String(...)` fallback for other non-plain objects; plain data passes through unchanged. Results are byte-identical to the main-thread engines except for those interpreted temporal objects.
 

@@ -155,6 +155,56 @@
             }
             push('unknown op → TableValidationConfigError', errs);
         }
+        // export op, ExcelJS ABSENT: the primary worker only imported Luxon, so exportXlsx must
+        // reject with the same config error the main-thread exporter raises — and not crash the
+        // worker (a follow-up ping still answers).
+        {
+            const errs = [];
+            let vr;
+            try {
+                vr = await call('validate', [schema, table, { referenceInstant: '2026-07-08T12:00:00Z' }]);
+            } catch (e) { errs.push('setup validate failed: ' + (e.message || JSON.stringify(e))); }
+            try {
+                await call('exportXlsx', [{ result: vr, table, schema }]);
+                errs.push('expected an ExcelJS-absent rejection');
+            } catch (e) {
+                if (e.name !== 'TableValidationConfigError') errs.push('wrong error name: ' + e.name);
+                if (!/ExcelJS global .*is required/.test(e.message || '')) errs.push('wrong message: ' + e.message);
+            }
+            try {
+                const p = await call('ping', []);
+                if (!p.version) errs.push('worker did not survive the export error');
+            } catch (e) { errs.push('worker crashed after export error: ' + (e.message || JSON.stringify(e))); }
+            push('exportXlsx without ExcelJS → clean config error, worker survives', errs);
+        }
+        // export op, ExcelJS PRESENT: a SECOND worker that importScripts the pinned ExcelJS
+        // bundle returns a real, structured-clone-safe Blob.
+        {
+            const errs = [];
+            const w2 = new Worker('../dist/table-validation-worker.js');
+            const pend2 = new Map(); let id2 = 0;
+            w2.onmessage = (ev) => {
+                const m = ev.data, p = pend2.get(m.id);
+                pend2.delete(m.id);
+                if (m.ok) p.resolve(m.result); else p.reject(m.error);
+            };
+            const call2 = (op, args) => new Promise((resolve, reject) => {
+                const id = ++id2; pend2.set(id, { resolve, reject });
+                w2.postMessage({ id, op, args });
+            });
+            try {
+                await call2('init', [[
+                    'https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js',
+                    'https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js',
+                ]]);
+                const vr = await call2('validate', [schema, table, { referenceInstant: '2026-07-08T12:00:00Z' }]);
+                const blob = await call2('exportXlsx', [{ result: vr, table, schema }]);
+                if (!(blob instanceof Blob)) errs.push('exportXlsx did not return a Blob: ' + Object.prototype.toString.call(blob));
+                else if (blob.size <= 0) errs.push('exportXlsx returned an empty Blob');
+            } catch (e) { errs.push('exportXlsx round-trip failed: ' + (e.message || JSON.stringify(e))); }
+            finally { w2.terminate(); }
+            push('exportXlsx with ExcelJS (second worker) → Blob round-trip', errs);
+        }
         render();
     })();
     </script>

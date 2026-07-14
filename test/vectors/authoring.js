@@ -29,8 +29,13 @@
                     `descriptor flags on ${s.path}`);
                 assert(s.doc && typeof s.doc.description === 'string' && s.doc.description.length > 0,
                     `doc.description on ${s.path}`);
-                assert(s.required ? s.default === undefined : 'default' in s,
-                    `default present iff optional on ${s.path}`);
+                // M2 (clarified 1.4.0): `default` present iff the setting is neither required
+                // NOR conditionally required. requiredWith is dependent-side (§A.1/§A.3): it
+                // sits on the setting that becomes required, so its mere presence IS the
+                // conditional-requirement marker.
+                const conditionallyRequired = (s.dependsOn || []).some((d) => d.kind === 'requiredWith');
+                assert((s.required || conditionallyRequired) ? s.default === undefined : 'default' in s,
+                    `default present iff optional and not conditionally-required on ${s.path}`);
             }
             const rt = JSON.parse(JSON.stringify(m));
             assertEq(rt.settings.length, m.settings.length, 'JSON round-trips');
@@ -48,6 +53,18 @@
             assertEq(rf.dependsOn[0].predicate.path, 'columns.<name>.type.regex', 'predicate path placeholder-scoped');
             const fm = byPath('structure.fieldNameMatching');
             assertEq(fm.relevantWhen, { path: 'structure.columnMatching', op: 'eq', value: 'byName' }, 'byName relevance');
+            // M2 (1.4.0): the four conditionally-required descriptors omit `default` entirely
+            for (const p of ['comparison.match.fuzzy.components', 'comparison.match.fuzzy.threshold',
+                'comparison.scope.column', 'customTableChecks[].expectedFieldRow']) {
+                const s = byPath(p);
+                assert(s && s.required === false && !('default' in s) && s.dependsOn.some((d) => d.kind === 'requiredWith'),
+                    `${p}: conditionally-required, no default key (M2)`);
+            }
+            // the TRIGGER (expectedField) is itself an ordinary optional setting: no
+            // requiredWith on it, default: null intact (1.4.0 direction reconciliation)
+            const ef = byPath('customTableChecks[].expectedField');
+            assert(ef && 'default' in ef && ef.default === null && !ef.dependsOn.some((d) => d.kind === 'requiredWith'),
+                'expectedField: plain optional trigger, keeps default: null, no requiredWith');
         },
     });
 
