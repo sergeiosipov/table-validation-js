@@ -4,7 +4,7 @@ A task-oriented guide to the console for analysts and data stewards. No programm
 required: everything in this guide happens in the browser, with the mouse and a few
 JSON snippets you can copy verbatim.
 
-*This guide covers console and library version 1.3.0. Screenshots are generated from the
+*This guide covers console and library version 1.4.0. Screenshots are generated from the
 committed example files by [`make-screenshots.py`](make-screenshots.py) — if the console
 changes, rerun that script and the images regenerate exactly.*
 
@@ -268,8 +268,11 @@ because uniqueness isn't enabled on that column.
 
 The type select comes first; the block below it swaps to that type's settings (formats
 and value range for a date; regex for a string; precision for a float; allowed values
-for a categorical). Constraints — `nullable`, `unique`, `severity`, `required` — sit
-under *column settings*.
+for a categorical). An **int or float column also carries a `formats` list** — the
+NumberFormat array that lets it accept regional spellings, accounting negatives and
+spelling contracts; chapter 9 covers it in full, including the **from example** box that
+compiles a format from a sample value you type. Constraints — `nullable`, `unique`,
+`severity`, `required` — sit under *column settings*.
 
 **Per-rule severity (byRule).** The plain severity select is the column's default; the
 *per-rule severity* table underneath overrides individual checks — and it only offers
@@ -342,6 +345,31 @@ column under that name; results keep the logical name `amount` — and **toleran
 `0.01`, meaning differences up to a cent are *equivalent*, not wrong. (The other columns
 here: `compare` to exclude a column from value comparison, `presence` when a column
 legitimately exists on one side only, `fuzzy` for approximate string matching.)
+
+**The tolerance editor** in that cell is a small form with a selector, and a flat `0.01`
+is only its simplest shape. The selector offers the four tolerance forms of core
+spec §15.8, and the chosen form's own inputs appear beside it:
+
+![The tolerance editor open on the amount row: the form selector set to "relative percent", a percent input reading 0.5, and an "of" column select set to amount.](img/07-tolerance-editor.png)
+
+- **absolute (number)** — a fixed ε, the same for every row (`0.01` = one cent).
+- **per-row field** — ε is read per row from another numeric column: pick the `field`,
+  and `from` chooses whether the driving value comes from the *expected* or the *produced*
+  side (default expected). Use it when the acceptable slack is itself data — a
+  `priceTolerance` column that travels with each row.
+- **relative percent** — ε scales with a value: `percent` × |value(`of`)| / 100, so a
+  `0.5%` tolerance on `of: grossWeight` grows with the weight.
+- **custom fn** — ε comes from a registered function returning a non-negative number. Like
+  any custom check, the console needs the function's code to *run* it: paste it under
+  Advanced mode (chapter 9), or run via the API — the config exports fine either way, and
+  the cell states the deferral when the function is absent.
+
+Whichever form you pick, the cell passes as a *tolerance match* only when the two sides
+actually **differ** but stay inside ε — an exact match is reported as `exact`, never as a
+tolerance match (§15.4). The one-click *adopt* button an inference offer shows (the
+`tolerance ±0.005 on "amount"` chip of chapter 9) always writes the **absolute** form
+into `comparison.fields.<col>.tolerance`; switch to another form here by hand when a
+relative or per-row rule fits the data better.
 
 Upload `orders-expected.csv` into the *Expected table* slot, ingest, and press
 **▶ Compare**. The verdict reads `✖ Invalid — 3 error(s), 0 warning(s) in 1 column(s)`;
@@ -449,6 +477,148 @@ labels the column *ambiguous* with the reason `mixedTemporalFormats`, so you kno
 a judgment call. The engine tries formats in order at run time, so both spellings then
 validate.
 
+**The same option rescues mixed *number* formats (new in 1.4.0).** A feed where some rows
+read `1,234.50` (US) and others `1.234,50` (European) has no single NumberFormat that
+accepts all of them, so without the option the column falls back to `string`. With it on,
+inference drafts every NumberFormat the column needs — winner (most participants) first,
+the rest as ranked alternatives — and labels the column *ambiguous* with the reason
+`mixedNumberFormats`, the numeric twin of `mixedTemporalFormats`. One caveat the offer
+states plainly: a union-covered numeric column drafts **no `value` range and no
+`precision` bound**, even with *suggest ranges* / *suggest precision* on — because a value
+can interpret under more than one of the union's formats, the observed min/max and decimal
+counts are not stable evidence, and a draft that baked them in could reject its own sample
+(Addendum §C.4 point 3). The report still shows the observed extremes; it just doesn't
+freeze them into a constraint.
+
+### Reading the offer: confidence and reasons
+
+The offer's **confidence** chip is honesty, not a score: `high` means one type read the
+column cleanly with no runner-up; `ambiguous` means the winner rests on a judgment you
+should see; `fallback` means the column landed on `string` because nothing else accepted
+it. The **reasons** column names *why*, in codes the console prints verbatim — the same
+codes you can search this guide for:
+
+- `mixedTemporalFormats` / `mixedNumberFormats` — union coverage (above): several formats
+  were needed, so the winner is a judgment call.
+- `twoDigitYear` — a `yy` format won; the century is a guess (see *Two-digit years* below).
+- `digitDate` — an 8-digit int column (`20260715`) that also parses as a `yyyyMMdd` date;
+  `int` still wins, but the date reading rides along as a ranked alternative.
+- `groupingAmbiguity` — every value looks like `1.234`, which reads equally as the decimal
+  `1.234` or the grouped integer `1234`. The winner stands, but the opposite reading is
+  offered as an alternative — check the report before trusting either.
+- `leadingZeroInt` / `unsafeInt` — the column is all digits but converting to a number
+  would **lose data**: a leading-zero id (`007` → `7`, and `01`/`1` collapse to one value)
+  or a magnitude past the safe-integer range (a 17+-digit number silently loses precision).
+  Inference keeps the column `string` and offers the numeric reading as a ranked
+  alternative — adopt it only if that loss is intended.
+- `numericLike` / `temporalLike` — the two *honesty labels*: the column is `string`
+  (nothing structured accepted it), but it *looks* like numbers (`-12.00`, `(3.50)`, `12%`)
+  or like dates/times (`9:05`, `15-Jul-2026`). The type is unchanged — the label just tells
+  you the fallback wasn't a boring text column, so it may deserve a second look. One is
+  visible on the `order_date` row of the chapter-3 offer screenshot.
+
+Two report-only extras never touch the draft. **Suggested tolerances** appear as the
+adoption chips above; **suggested patterns** (new in 1.4.0) — a spelling like `#,##0.00`
+inferred when every value in an int/float column shares the same decimal-digit count and
+grouping — appear only in the offer's downloadable **inference report** (the *Download
+report* button, under `suggestions.patterns`), never as a chip and never in the draft: a
+pattern is an authorial contract, not observable evidence, so inference proposes it for you
+to add by hand (§9's number-formats section), never bakes it in (Addendum §C.7).
+
+**Inference can also conclude `categorical`.** A low-cardinality text column — at least 20
+sampled rows, no more than 12 distinct values, and distinct/rows ≤ 0.2 — infers
+`categorical` with the observed values drafted as `allowedValues` (a dozen repeated
+status codes become an enumerated contract). Below those thresholds the evidence is too
+thin and the column stays `string`; the thresholds are fixed by the specification, so the
+draft is deterministic (Addendum §C.5). The worked example's `status` column has only 13
+rows, so it never trips the floor — a real code column with a few hundred rows does.
+
+### Number formats: regional numbers, negatives, and spelling contracts
+
+An `int` or `float` column carries a **`formats` list** of NumberFormats — the parametric
+description of how its numbers are *written*, so the engine can read them without rewriting
+the cell (core spec §3.5). Each NumberFormat names the roles of the literal characters:
+
+- `decimalSeparator` and `groupingSeparators` — `{".",[","]}` reads `1,234.50`;
+  `{",",["."]}` reads `1.234,50`; `{",",[" "]}` reads `1 234,50`.
+- `allowBareDecimal` — accept a number written without its integer part: `.85` reads as
+  `0.85`.
+- `negativeStyle` — how negatives are spelled. The default `leadingSign` is the plain
+  `-12.00`; `parentheses` reads accounting negatives `(1,234.50)`; `trailingMinus` reads
+  the SAP-style `1234.50-`. All of them interpret to the canonical `-1234.50`. Under the
+  two non-default styles the sign lives **only** in the decoration — a `parentheses` format
+  reads `(12.00)` but *rejects* a plain `-12.00`, so a column that mixes `-x` and `(x)`
+  needs **two** formats in the array (the engine tries them in order).
+- `pattern` — a **spelling contract**: `#,##0.00` demands digit-for-digit grouping and
+  exactly two decimals, so `1,234.50` and `234.50` pass while `1234.50` (no grouping) and
+  `1,234.5` (one decimal) are rejected. A pattern constrains *lexical shape* only —
+  magnitude and scale still belong in the `value` / `precision` ranges.
+
+![The amount column editor with its formats list holding one NumberFormat carrying negativeStyle "parentheses" and pattern "#,##0.00", shown as JSON in the formats field.](img/09-numberformat.png)
+
+**The one genuinely surprising rule** is what `pattern` does to the rest of the column:
+the moment **any** declared format carries a `pattern`, the column **stops accepting plain
+spellings**. Normally an int/float column has a direct-parse fallback — `6.16` reads as a
+number even if no format matched it. A pattern is an explicit contract ("always exactly
+`0.0000`"), and a fallback that quietly admitted `6.16` would defeat it, so the fallback is
+**suppressed**: acceptance becomes *exactly* the formats array, nothing more (§3.5). This
+is intended and load-bearing — but it means a single pattern-bearing format makes the whole
+column strict, so add one only when you truly mean "these are the only acceptable
+spellings." (Combining `parentheses` with a pattern therefore also rejects leading-minus
+negatives — a hard accounting contract by design.)
+
+**The `from example` box** saves you from writing NumberFormats by hand. Next to the
+`formats` field on any int/float column, type a sample value and the console compiles it to
+a parametric format and offers it as an append button — you always see the compiled JSON
+before it goes in, and nothing is applied silently:
+
+![The amount column editor's formats field with the "from example" box: the typed example "(1 234,50)" has compiled to an append button reading the JSON {"decimalSeparator":",","groupingSeparators":[" "],"negativeStyle":"parentheses"}.](img/09-compiler.png)
+
+Type `(1 234,50)` and it reads the parentheses as `negativeStyle`, the space as grouping
+and the comma as the decimal. When an example is genuinely ambiguous — `1.234` is a
+decimal *or* a grouped integer — the box offers **both** compiled formats and lets you pick
+the intended one, rather than guessing. It only ever *appends*; your existing formats stay.
+
+### Two-digit years and the century pivot
+
+A two-digit year (`30/06/19`) can't say which century it means. Inference reads `yy`
+formats under a fixed **pivot** and always flags the column `ambiguous` with the reason
+`twoDigitYear`, because the century is a guess you should confirm. The default pivot is
+`1961`, which maps a two-digit year into the window `[1961, 2060]` (so `19` → `2019`,
+`85` → `1985`). When that window is wrong — birthdates, vintage records — set
+`evaluation.twoDigitYearPivot` on the **② Schema** tab under table settings (e.g. `1900`
+maps into `[1900, 1999]`). It also takes a **per-column override**,
+`columns.<name>.evaluation.twoDigitYearPivot`, for a table that mixes, say, a birthdate
+column (pivot 1900) with an expiry column (default) — a `null` override inherits the table
+value (core spec §5.4, §3.4). Inference never *writes* the setting (it drafts under the
+default so the schema behaves identically), but the report's interpreted `min`/`max`
+already embody the guess, which is why every two-digit-year conclusion goes to you.
+
+### Sub-second timestamps
+
+The `SSSSSS` token accepts a six-digit fractional second, so database timestamps like
+`2026-07-15 14:30:45.123456` validate. All six digits are checked lexically; be aware the
+**instant** the value carries is only millisecond-resolution under the default engine
+(Luxon), so two timestamps differing only past the third fractional digit compare **equal**
+as instants — the digits are validated, the sub-millisecond precision is not carried
+(core spec §13.3).
+
+### Many files at once (the batch tool)
+
+The console is one table at a time. When you have forty supplier files to profile,
+[`batch-infer-standalone.html`](../batch-infer-standalone.html) is the companion tool: pick
+many files (or a whole folder — it recurses and filters to the supported extensions), it
+infers one draft config per file, and downloads everything as one ZIP (a config and
+optional evidence report per file, plus a `manifest.json` that lists every input with its
+outcome, failures included) or as one combined **XLSX review workbook** — a sheet per file
+with the inferred column metadata above the ingested data. Drafts are still suggestions;
+review the interesting ones back in this console. The tool documents itself on its own page
+(its whole UI is one screen), so this guide only points at it. Get it from the release
+archive of the pinned tag, or copy the single file from the repository — note it **cannot**
+be opened from a `cdn.jsdelivr.net` URL directly, because jsDelivr serves HTML as plain
+text; the file has to travel to the machine, which is exactly what that single-file build is
+for.
+
 ### One-click adoption
 
 Some inference findings are suggestions you'd want without replacing your whole config.
@@ -555,6 +725,7 @@ Other situations you may meet:
 | `messageTemplates is not valid JSON` when running | the template field doesn't parse | fix the JSON (it must be an object of string templates); clear the field to disable |
 | *"localStorage is unavailable …"* notice | private-browsing mode or a full quota | the console keeps working for the session; use **Download** / **Export workspace** to keep your work |
 | A result view says *"No register collected in this run"* | the run didn't collect what the view needs | tick the corresponding output and **Re-run** — the console never errors on this, it tells you |
+| A notice says a column name *"contains '.' or brackets — the per-column editor cannot address such names"* | a header like `price.eur` or `sales[0]` validates fine, but the console addresses columns by dotted path, so its per-column editor can't open one whose own name contains `.`, `[` or `]` | rename the source header, or rename the column on the ② Schema tab (the console blocks those characters in renames), then edit it normally |
 | `⛔ … aborted (…)` verdict | the run stopped early (e.g. the config was invalid at run time) | read the abort reason in the Report view; fix the config on ② Schema |
 
 ## 11. Cheat sheet
@@ -583,14 +754,18 @@ The mess → what to do in the console:
 | Two-digit years (`30/06/19`) | inference drafts `dd/MM/yy`-style formats, always flagged **ambiguous** — the century is a guess (years map into `[pivot, pivot+99]`, default pivot 1961). Wrong century? Set `evaluation.twoDigitYearPivot` (e.g. 1900 for birthdates), per column if needed | [9](#9-power-features) |
 | Database timestamps (`…14:30:45.123456`) | `SSSSSS` accepts six-digit fractions (instants carry millisecond resolution) | [9](#9-power-features) |
 | `#N/A`, `n/a`, `None`, `--` scattered in cells | recognized null-token candidates since 1.3.0 — adopted into `nullEquivalents` when observed | [9](#9-power-features) |
-| Zero-padded ids (`007`) or 17-digit numbers | inferred as **string** with the numeric reading as a ranked alternative — converting would destroy zeros or precision; adopt the alternative only if that loss is intended | [9](#9-power-features) |
-| Every value looks like `1.234` | the winner is flagged ambiguous with the other reading (decimal vs thousands) as an alternative — check the report before trusting either | [9](#9-power-features) |
+| Zero-padded ids (`007`) or 17-digit numbers | inferred as **string** (offer reason `leadingZeroInt` / `unsafeInt`) with the numeric reading as a ranked alternative — converting would destroy zeros or precision; adopt the alternative only if that loss is intended | [9](#9-power-features) |
+| Every value looks like `1.234` | the winner is flagged ambiguous (offer reason `groupingAmbiguity`) with the other reading (decimal vs thousands) as an alternative — check the report before trusting either | [9](#9-power-features) |
+| A feed mixes `1,234.50` and `1.234,50` number spellings | infer with **all accepting formats** — the column drafts a union of NumberFormats (reason `mixedNumberFormats`) and validates both; union columns draft no value/precision | [9](#9-power-features) |
+| A dozen repeated codes in a low-cardinality column | inference concludes `categorical` (≥20 rows, ≤12 distinct, ratio ≤0.2) and drafts the observed values as `allowedValues` | [9](#9-power-features) |
+| A `string` column that *looks* numeric/temporal but stayed text | the offer's `fallback` confidence plus reason `numericLike` / `temporalLike` flags it for a second look — the type is honest, the label is the hint | [3](#3-fast-path-file--verdict-in-three-clicks), [9](#9-power-features) |
+| A header like `price.eur` or `sales[0]` | validates fine, but the per-column editor can't address a dotted/bracketed name — rename the header or the column on the Schema tab | [6](#6-editing-the-config-by-hand), [10](#10-troubleshooting) |
 | "What did my change do?" | re-run and read the **Δ Delta** view | [8](#8-iterating) |
 | "Why is this button disabled?" | hover it — every disabled control in the console carries its reason | [2](#2-getting-started), [4](#4-reading-results) |
 
 Deeper reading: the [README](../README.md) (library overview and the messy-data
-cookbook) and the [console architecture](../table-validation-ui-architecture-v1.3.2.md)
+cookbook) and the [console architecture](../table-validation-ui-architecture-v1.4.0.md)
 (§11 maps every library capability to its place in the UI) live in this repository; the
-[core specification](https://github.com/sergeiosipov/table-validation-spec/blob/v1.3.2/table-validation-core-spec-v1.3.2.md)
+[core specification](https://github.com/sergeiosipov/table-validation-spec/blob/v1.4.0/table-validation-core-spec-v1.4.0.md)
 (the exact meaning of every check and verdict) lives in the companion
 `table-validation-spec` repository.

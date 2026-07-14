@@ -18,7 +18,7 @@
         // v1.3.1 shipped drafts stamping a stale '1.3.0' — pin both stamps to the
         // constant so a missed bump can never ship silently again. The ONE literal
         // release pin of the suite lives here (release-check enforces its presence):
-        t.assertEq(TV().SPEC_VERSION, '1.3.2', 'release literal');
+        t.assertEq(TV().SPEC_VERSION, '1.4.0', 'release literal');
         const seed = TV().createConfigBuilder().build();
         t.assertEq(seed.meta.schemaVersion, TV().SPEC_VERSION, 'builder default seed schemaVersion');
         const inf = TV().inferConfig({ headers: ['a'], rows: [['1'], ['2'], ['3']] });
