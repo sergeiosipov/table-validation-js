@@ -257,6 +257,8 @@
             if (cd.delta !== null && cd.delta !== undefined) parts.push(`Δ ${cd.delta}`);
             if (cd.tolerance !== null && cd.tolerance !== undefined) parts.push(`ε ${cd.tolerance}`);
             if (cd.similarity !== null && cd.similarity !== undefined) parts.push(`similarity ${cd.similarity}`);
+            // §15.9/§15.11 (1.5.1): the Δ/ε shown were decided in binary64, not exact decimal
+            if (cd.exactFallback !== null && cd.exactFallback !== undefined) parts.push('binary64 fallback');
             return parts.join(' · ');
         };
         // row-level diff-check severities by check name (for the max-severity tint, §15.11)

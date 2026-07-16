@@ -1,6 +1,6 @@
 /*!
- * table-validation v1.5.0 — hand-authored TypeScript declarations for the Browser JS
- * profile (Core Specification v1.5.0 + Authoring, Ingestion & Inference Addendum v1.5.0).
+ * table-validation v1.5.1 — hand-authored TypeScript declarations for the Browser JS
+ * profile (Core Specification v1.5.1 + Authoring, Ingestion & Inference Addendum v1.5.1).
  * The runtime is a single IIFE exposing one global, `TableValidation`; these
  * declarations describe that global. No build step — this file is authored by hand,
  * kept in lockstep with dist/table-validation.js, and served from the same CDN tag.

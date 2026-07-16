@@ -842,6 +842,73 @@
         t.assertEq(argb(unexpectedRow.getCell(1)), 'FFFFC7CE', 'rowUnexpected status highlighted error');
     }, { needsExcelJS: true });
 
+    // B112 — exportComparisonXlsx §15.11 (1.5.1): the [b64] fallback tag on an exact-enabled column.
+    // A decimal-TEXT vs NATIVE-number pair has no exact text to honor (§15.8 native-cell fallback), so
+    // exactFallback = 'binary64' and the cell text gains a trailing [b64] — severity-independent.
+    U('exportComparisonXlsx (§15.11, 1.5.1) — [b64] appended when an exact column pair falls back to binary64', async (t) => {
+        const schema = baseSchema({ match: { keys: ['id'] }, fields: { amount: { exact: true } } });
+        const produced = T([['1', 'a', '2.53']]);
+        const expected = T([['1', 'a', 2.5]]);              // native number on the expected side
+        const r = TV().compare(schema, produced, expected);
+        t.assertEq(r.diff.rows[0].cells.amount.exactFallback, 'binary64', 'the native-cell pair fell back to binary64');
+        const blob = await TV().exportComparisonXlsx({ result: r, table: produced, schema, expected });
+        const wb = new window.ExcelJS.Workbook();
+        await wb.xlsx.load(await blob.arrayBuffer());
+        const cmp = wb.getWorksheet('Comparison');
+        t.assertEq(cmp.getRow(2).getCell(5).value, '✖ 2.53 ≠ 2.5 [b64]', 'valueMismatch cell text ends with [b64]');
+    }, { needsExcelJS: true });
+
+    // B113 — the same native-fallback pair under exact:false records no fallback → no [b64] (opt-in proof).
+    U('exportComparisonXlsx (§15.11, 1.5.1) — the same pair renders NO [b64] under exact:false', async (t) => {
+        const schema = baseSchema({ match: { keys: ['id'] }, fields: { amount: { exact: false } } });
+        const produced = T([['1', 'a', '2.53']]);
+        const expected = T([['1', 'a', 2.5]]);
+        const r = TV().compare(schema, produced, expected);
+        t.assertEq(r.diff.rows[0].cells.amount.exactFallback, null, 'exact:false never records a fallback');
+        const blob = await TV().exportComparisonXlsx({ result: r, table: produced, schema, expected });
+        const wb = new window.ExcelJS.Workbook();
+        await wb.xlsx.load(await blob.arrayBuffer());
+        const cmp = wb.getWorksheet('Comparison');
+        t.assertEq(cmp.getRow(2).getCell(5).value, '✖ 2.53 ≠ 2.5', 'no [b64] when the column is not exact');
+    }, { needsExcelJS: true });
+
+    // B114 — a text-vs-text exact pair is evaluated in exact decimal (§15.8), never falls back → no [b64].
+    U('exportComparisonXlsx (§15.11, 1.5.1) — a text-vs-text exact pair renders NO [b64]', async (t) => {
+        const schema = baseSchema({ match: { keys: ['id'] }, fields: { amount: { exact: true } } });
+        const produced = T([['1', 'a', '2.53']]);
+        const expected = T([['1', 'a', '2.5']]);            // both sides decimal TEXT
+        const r = TV().compare(schema, produced, expected);
+        t.assertEq(r.diff.rows[0].cells.amount.exactFallback, null, 'text-vs-text pair evaluated exactly, no fallback');
+        const blob = await TV().exportComparisonXlsx({ result: r, table: produced, schema, expected });
+        const wb = new window.ExcelJS.Workbook();
+        await wb.xlsx.load(await blob.arrayBuffer());
+        const cmp = wb.getWorksheet('Comparison');
+        t.assertEq(cmp.getRow(2).getCell(5).value, '✖ 2.53 ≠ 2.5', 'exact-decimal text pair carries no [b64]');
+    }, { needsExcelJS: true });
+
+    // B115 — tag composition order. The engine never co-emits crossTypeMismatch (→ [t]) and exactFallback
+    // (→ [b64]): crossTypeMismatch returns before the §15.8 fallback path. To lock the pinned presentational
+    // order ([t] then [b64], order of introduction) the exporter's cmpCellText rendering is driven with a
+    // constructed CellDiff carrying both — the only way the composition is observable.
+    U('exportComparisonXlsx (§15.11, 1.5.1) — [t] then [b64] compose in introduction order', async (t) => {
+        const schema = baseSchema({ match: { keys: ['id'] }, fields: { amount: { exact: true } } });
+        const cd = {
+            rollup: 'different', tier: 'crossTypeMismatch', produced: 'x', expected: 5,
+            producedInterpreted: null, expectedInterpreted: 5,
+            delta: null, tolerance: null, similarity: null, exactFallback: 'binary64',
+        };
+        const synth = { cellRegister: [], diff: { rows: [{ status: 'matched', inScope: true, checkFails: [], cells: { amount: cd } }] } };
+        const blob = await TV().exportComparisonXlsx({
+            result: synth, schema,
+            table: { headers: ['amount'], rows: [['x']] }, expected: { headers: ['amount'], rows: [[5]] },
+        });
+        const wb = new window.ExcelJS.Workbook();
+        await wb.xlsx.load(await blob.arrayBuffer());
+        const cmp = wb.getWorksheet('Comparison');
+        // only 'amount' is present → header [Match Status, Scope, amount] → amount is cell 3
+        t.assertEq(cmp.getRow(2).getCell(3).value, '✖ x ≠ 5 [t] [b64]', 'tags render as [t] then [b64]');
+    }, { needsExcelJS: true });
+
     // ---------------- v1.4.0 coverage vectors (P6) ----------------
 
     // B100 — Core §13.3's documented cross-engine consequence: two datetimes differing only beyond

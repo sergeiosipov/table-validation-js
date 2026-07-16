@@ -4,7 +4,7 @@ A task-oriented guide to the console for analysts and data stewards. No programm
 required: everything in this guide happens in the browser, with the mouse and a few
 JSON snippets you can copy verbatim.
 
-*This guide covers console and library version 1.5.0. Screenshots are generated from the
+*This guide covers console and library version 1.5.1. Screenshots are generated from the
 committed example files by [`make-screenshots.py`](make-screenshots.py) — if the console
 changes, rerun that script and the images regenerate exactly.*
 
@@ -662,7 +662,11 @@ many files (or a whole folder — it recurses and filters to the supported exten
 infers one draft config per file, and downloads everything as one ZIP (a config and
 optional evidence report per file, plus a `manifest.json` that lists every input with its
 outcome, failures included) or as one combined **XLSX review workbook** — a sheet per file
-with the inferred column metadata above the ingested data. Drafts are still suggestions;
+with the inferred column metadata above the ingested data. That metadata carries a **reasons**
+column — the same codes the [*Reading the offer*](#reading-the-offer-confidence-and-reasons)
+list spells out (chapter 9), so an `ambiguous` or otherwise flagged column always explains
+itself on the sheet — and a **suggested tolerance** column surfacing the same report-only
+precision suggestion the console offers as an adoption chip. Drafts are still suggestions;
 review the interesting ones back in this console. The tool documents itself on its own page
 (its whole UI is one screen), so this guide only points at it. Get it from the release
 archive of the pinned tag, or copy the single file from the repository — note it **cannot**
@@ -817,8 +821,8 @@ The mess → what to do in the console:
 | "Why is this button disabled?" | hover it — every disabled control in the console carries its reason | [2](#2-getting-started), [4](#4-reading-results) |
 
 Deeper reading: the [README](../README.md) (library overview and the messy-data
-cookbook) and the [console architecture](../table-validation-ui-architecture-v1.5.0.md)
+cookbook) and the [console architecture](../table-validation-ui-architecture-v1.5.1.md)
 (§11 maps every library capability to its place in the UI) live in this repository; the
-[core specification](https://github.com/sergeiosipov/table-validation-spec/blob/v1.5.0/table-validation-core-spec-v1.5.0.md)
+[core specification](https://github.com/sergeiosipov/table-validation-spec/blob/v1.5.1/table-validation-core-spec-v1.5.1.md)
 (the exact meaning of every check and verdict) lives in the companion
 `table-validation-spec` repository.
