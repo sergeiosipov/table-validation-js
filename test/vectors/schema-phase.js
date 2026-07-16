@@ -156,6 +156,23 @@
     });
 
     V({
+        name: 'schemaValidationError — sumEquals exact must be boolean (§7.2, rule 39 neighborhood, 1.5.0)',
+        schema: {
+            meta: { schemaVersion: '1.0.0', name: 't' },
+            columns: { x: { type: { name: 'float' } } },
+            customTableChecks: [{ name: 's', type: 'sumEquals', fields: ['x'], expectedValue: 1, exact: 'yes' }],
+        },
+        table: { headers: ['x'], rows: [] },
+        expect: {
+            valid: false,
+            summary: {
+                bySeverity: { error: 1 },
+                details: [{ ruleName: 'schemaValidationError', context: { path: 'customTableChecks[0].exact', expected: 'boolean' } }],
+            },
+        },
+    });
+
+    V({
         name: 'irrelevantSetting — infos for byPosition name machinery and strict-mode formats',
         schema: {
             meta: { schemaVersion: '1.0.0', name: 't' },

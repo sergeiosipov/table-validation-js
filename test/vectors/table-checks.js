@@ -153,6 +153,77 @@
     });
 
     V({
+        name: 'sumEquals exact (§7.2, 1.5.0) — ten "0.10" sum to exactly 1.00 and PASS at tolerance 0',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { x: { type: { name: 'float' } } },
+            customTableChecks: [{
+                name: 's', type: 'sumEquals', fields: ['x'],
+                expectedValue: 1.00, expectedField: null, tolerance: 0, exact: true,
+            }],
+        },
+        table: { headers: ['x'], rows: [['0.10'], ['0.10'], ['0.10'], ['0.10'], ['0.10'], ['0.10'], ['0.10'], ['0.10'], ['0.10'], ['0.10']] },
+        expect: {
+            valid: true,
+            summary: { bySeverity: { error: 0, warning: 0 } },
+            cellRegister: [],
+        },
+    });
+
+    V({
+        name: 'sumEquals exact opt-in (§7.2, 1.5.0) — the SAME check with exact:false FAILS on binary64 drift (proves opt-in + byte-identical default)',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { x: { type: { name: 'float' } } },
+            customTableChecks: [{
+                name: 's', type: 'sumEquals', fields: ['x'],
+                expectedValue: 1.00, expectedField: null, tolerance: 0, exact: false,
+            }],
+        },
+        table: { headers: ['x'], rows: [['0.10'], ['0.10'], ['0.10'], ['0.10'], ['0.10'], ['0.10'], ['0.10'], ['0.10'], ['0.10'], ['0.10']] },
+        expect: {
+            valid: false,
+            summary: {
+                bySeverity: { error: 1, warning: 0 },
+                details: [{
+                    ruleName: 'sumEquals:s', fieldName: 'x', count: 10,
+                    context: { expectedSum: 1, tolerance: 0 },   // binary64 sum ≠ 1 at tolerance 0
+                }],
+            },
+        },
+    });
+
+    V({
+        name: 'sumEquals exact (§7.2, 1.5.0) — a native-number cell contributes its canonical rendering and records its row in binary64FallbackRows; exact decimal strings at scale s',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { x: { type: { name: 'float' } } },
+            customTableChecks: [{
+                name: 's', type: 'sumEquals', fields: ['x'],
+                expectedValue: 5.00, expectedField: null, tolerance: 0, exact: true,
+            }],
+        },
+        table: { headers: ['x'], rows: [['0.10'], [0.2], ['0.30']] },   // row 1 is a native number
+        expect: {
+            valid: false,
+            summary: {
+                bySeverity: { error: 1, warning: 0 },
+                details: [{
+                    ruleName: 'sumEquals:s', fieldName: 'x', count: 3,
+                    context: {
+                        fields: ['x'], expectedSum: '5.00', actualSum: '0.60',
+                        tolerance: 0, exact: true, binary64FallbackRows: [1],
+                    },
+                    message: 'Rule "s": sum 0.60 ≠ expected 5.00 (±0)',
+                }],
+            },
+        },
+    });
+
+    V({
         name: 'custom table check — (row, field) fails become violations',
         schema: {
             meta: META, resultConfig: RC,

@@ -125,6 +125,10 @@ declare namespace TableValidation {
         expectedField?: string | null;
         expectedFieldRow?: 'first' | 'last' | number;
         tolerance?: number;
+        /** sumEquals only (Core §7.2, added in 1.5.0): sum decimal-text cells in exact decimal.
+         *  Default false = byte-identical to pre-1.5.0. When true, the violation context also
+         *  carries `exact: true` and `binary64FallbackRows: number[]` (native-cell rows). */
+        exact?: boolean;
         fn?: string;
         params?: object | null;
     }
@@ -166,6 +170,9 @@ declare namespace TableValidation {
                 /** Header the EXPECTED table carries this column under (Core §15.6). */
                 expectedName?: string | null;
                 tolerance?: ToleranceSpec | null;
+                /** int/float only (Core §15.8, added in 1.5.0): exact-decimal Δ/tolerance
+                 *  arithmetic for text-vs-text pairs. Default false = binary64 (unchanged). */
+                exact?: boolean;
                 fuzzy?: CellFuzzySpec | null;
             };
         };
@@ -313,9 +320,15 @@ declare namespace TableValidation {
         expected: Cell;
         producedInterpreted: unknown;
         expectedInterpreted: unknown;
-        delta: number | null;
-        tolerance: number | null;
+        /** |produced − expected| for numeric pairs; an exact-decimal string when the pair was
+         *  evaluated under `fields.<col>.exact: true` (Core §15.8, added in 1.5.0). */
+        delta: number | string | null;
+        /** resolved ε(row) when a tolerance applies; an exact-decimal string under exact evaluation (1.5.0). */
+        tolerance: number | string | null;
         similarity: number | null;
+        /** non-null when the column carries `exact: true` but this pair fell back to binary64
+         *  (a native-number cell — Core §15.8/§15.9, added in 1.5.0); else null. */
+        exactFallback: 'binary64' | null;
     }
 
     interface RowDiff {
@@ -599,6 +612,9 @@ declare namespace TableValidation {
         name: string;
         inferredType: string;
         confidence: 'high' | 'ambiguous' | 'fallback';
+        /** e.g. "multipleTemporalFormats", "twoDigitYear", "groupingAmbiguity", and (1.5.0)
+         *  "mixedPadding" (§C.4) and the advisory "decimalText" (§C.8 — the one reason that
+         *  can accompany a `high` label). */
         reasons: string[];
         alternatives: Array<{ type: string; formats: string[] | null; rank: number }>;
         observed: {
@@ -610,6 +626,10 @@ declare namespace TableValidation {
             max: unknown;
             minPrecision: number | null;
             maxPrecision: number | null;
+            /** §C.8 (1.5.0): per-component padding evidence when reason `mixedPadding` fired —
+             *  one key per examined unpadded-token component, labeled by the winner's tokens
+             *  ("day"/"month"); null otherwise. */
+            paddingStyle: { [component: string]: { padded: number; unpadded: number; neutral: number } } | null;
             reliedOnInterpretation: boolean;
         };
         candidateKey: boolean;

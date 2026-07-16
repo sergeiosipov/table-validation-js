@@ -559,11 +559,12 @@ comparison: { fields: {
     yield: { tolerance: { fn: "yieldTol" } }   // → looks up options.functions.yieldTol
 }}
 
-// tolFn signature:
-(row, interpreted, params) → number    // the per-row tolerance ε ≥ 0
-//   row         — the authoritative side's raw row ("from": "expected" (default) | "produced")
-//   interpreted — that row's interpreted values (map)
-//   params      — the field's tolerance params object
+// tolFn signature (matches the engine call site and the `ToleranceFn` type in the .d.ts;
+//   corrected — an earlier draft listed a stale `(row, interpreted, params)` shape):
+(cellPair, rowDiff, params) → number   // the per-row tolerance ε ≥ 0
+//   cellPair — { field, produced, expected }: the cell pair under evaluation (raw cells)
+//   rowDiff  — the row's RowDiff (matchKey, status, producedRow/expectedRow, cells, …)
+//   params   — the field's tolerance params object
 ```
 
 A within-tolerance non-exact numeric pair (`|producedᵢ − expectedᵢ| ≤ ε(row)`) is the `toleranceMatch` tier; the diff entry context carries `{ delta, tolerance, toleranceSource }`.

@@ -320,13 +320,19 @@
         needsLuxon: true,
         fn: ({ assert, assertEq }) => {
             // mixed padded/unpadded: only the unpadded twin accepts everything -> sole
-            // accepter after twin reduction -> HIGH confidence, no alternatives
+            // accepter after twin reduction (d.M.yyyy, no alternatives). Since 1.5.0 the month
+            // rendering mixes '7'/'07'/'12', so the mixedPadding signal (§C.4) fires: confidence
+            // drops to ambiguous with reason mixedPadding, the draft stays byte-identical.
             const mixed = { headers: ['d'], rows: [['1.7.2026'], ['15.07.2026'], ['3.12.2026']] };
             const r = TV().inferConfig(mixed);
             assertEq(r.report.columns[0].inferredType, 'date', 'unpadded column infers date');
-            assertEq(r.draft.columns.d.type.formats, ['d.M.yyyy'], 'unpadded format drafted');
-            assertEq(r.report.columns[0].confidence, 'high', 'sole accepter after twin reduction');
-            assertEq(r.report.columns[0].alternatives, [], 'no alternatives');
+            assertEq(r.draft.columns.d.type.formats, ['d.M.yyyy'], 'unpadded format drafted (sole accepter after reduction)');
+            assertEq(r.report.columns[0].confidence, 'ambiguous', 'mixed padded/unpadded month → mixedPadding (1.5.0)');
+            assertEq(r.report.columns[0].reasons, ['mixedPadding'], 'the sole reason is mixedPadding (no temporal ambiguity here)');
+            assertEq(r.report.columns[0].alternatives, [], 'mixedPadding adds no alternative');
+            assertEq(r.report.columns[0].observed.paddingStyle,
+                { day: { padded: 0, unpadded: 2, neutral: 1 }, month: { padded: 1, unpadded: 1, neutral: 1 } },
+                'per-component evidence: day never padded, month is the mixed component');
             assertN1(assert, r.draft, 'unpadded');
             assert(TV().validate(r.draft, mixed).valid, 'the draft validates its own sample');
             // all-padded column: byte-identical to 1.0.0 -- padded winner, high, no
@@ -901,7 +907,7 @@
             const dateYyyy = [
                 { fmt: 'd.MM.yyyy', rows: ['1.07.2026', '25.12.2026'] },
                 { fmt: 'dd.M.yyyy', rows: ['25.7.2026', '13.12.2026'] },
-                { fmt: 'dd/M/yyyy', rows: ['25/07/2026', '13/2/2026'] },
+                { fmt: 'dd/M/yyyy', rows: ['25/2/2026', '13/11/2026'] },   // month '2'/'11' — unpadded+neutral, no mixed-padding (1.5.0)
                 { fmt: 'M/dd/yyyy', rows: ['7/25/2026', '11/13/2026'] },
                 { fmt: 'MM/d/yyyy', rows: ['06/25/2026', '11/4/2026'] },
                 { fmt: 'd-MM-yyyy', rows: ['1-07-2026', '25-12-2026'] },
@@ -1050,6 +1056,90 @@
             ], 'ranked alternatives reflect the reduced union set, ranked by accepted count');
             assertN1(assert, draft, 'union-family-reduction');
             assert(TV().validate(draft, t).valid, 'the draft validates its own sample');
+        },
+    });
+
+    // ---------------- v1.5.0: mixedPadding signal (§C.4/§C.8) + decimalText advisory (§C.8) ----------------
+
+    U.push({
+        suite, name: 'mixedPadding (§C.4/§C.8): mixed padded/unpadded components under an unpadded winner fire the signal',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            const t = { headers: ['d'], rows: [['01/01/2026'], ['2/01/2026'], ['03/1/2026']] };
+            const { draft, report } = TV().inferConfig(t);
+            const c = report.columns[0];
+            assertEq(c.inferredType, 'date', 'winner is a date');
+            assertEq(draft.columns.d.type.formats, ['d/M/yyyy'], 'tightest cross-family survivor is the winner');
+            assertEq(c.confidence, 'ambiguous', 'a mixed padded/unpadded style is a reviewer judgment');
+            assertEq(c.reasons, ['multipleTemporalFormats', 'mixedPadding'],
+                'fixed append order: temporal-ambiguity then mixedPadding');
+            assertEq(c.alternatives, [{ type: 'date', formats: ['M/d/yyyy'], rank: 1 }],
+                'mixedPadding ADDS no alternative; the cross-family tie supplies M/d/yyyy');
+            assertEq(c.observed.paddingStyle,
+                { day: { padded: 2, unpadded: 1, neutral: 0 }, month: { padded: 2, unpadded: 1, neutral: 0 } },
+                'per-component evidence keyed by the winner tokens (day/month); both mixed 2/1/0');
+            // draft byte-identical + self-accepting (§C.1): it still validates its own sample
+            assertN1(assert, draft, 'mixedPadding');
+            assert(TV().validate(draft, t).valid, 'the byte-identical draft validates its own sample');
+        },
+    });
+
+    U.push({
+        suite, name: 'mixedPadding must NOT fire: all-padded / consistently-unpadded / neutral-heavy carry no paddingStyle',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            // consistently unpadded; the >12 value 22 is neutral, so the day component has no
+            // padded evidence — the column stays HIGH
+            const unpad = TV().inferConfig({ headers: ['d'], rows: [['1/01/2026'], ['22/12/2026']] });
+            assertEq(unpad.draft.columns.d.type.formats, ['d/MM/yyyy'], 'reduction picks d/MM/yyyy');
+            assertEq(unpad.report.columns[0].confidence, 'high', 'consistently-unpadded stays high');
+            assertEq(unpad.report.columns[0].reasons, [], 'no mixedPadding');
+            assertEq(unpad.report.columns[0].observed.paddingStyle, null, 'no paddingStyle when the signal does not fire');
+            // all-padded: the winner carries no unpadded token, so the detection inspects nothing.
+            // A >12 day (13) disambiguates the cross-family tie, so the label is a clean high.
+            const allPad = TV().inferConfig({ headers: ['d'], rows: [['01/02/2026'], ['13/02/2026']] });
+            assertEq(allPad.draft.columns.d.type.formats, ['dd/MM/yyyy'], 'padded winner');
+            assertEq(allPad.report.columns[0].confidence, 'high', 'all-padded stays high');
+            assert(!allPad.report.columns[0].reasons.includes('mixedPadding'), 'a padded winner is never examined');
+            assertEq(allPad.report.columns[0].observed.paddingStyle, null, 'no paddingStyle');
+            // neutral-heavy (values >= 10 are neutral evidence of neither style)
+            const neutral = TV().inferConfig({ headers: ['d'], rows: [['10/13/2026'], ['11/13/2026'], ['1/13/2026']] });
+            assertEq(neutral.report.columns[0].confidence, 'high', 'neutral-heavy stays high');
+            assert(!neutral.report.columns[0].reasons.includes('mixedPadding'), 'neutral renderings fire nothing');
+            assertEq(neutral.report.columns[0].observed.paddingStyle, null, 'no paddingStyle');
+            // the literal §C.4 all-padded example {01/02/2026, 03/02/2026} is INDEPENDENTLY
+            // ambiguous (dd/MM vs MM/dd, no >12 disambiguator) — but mixedPadding still does NOT
+            // fire, since the winner token is padded (see the engine-surgeon escalation note)
+            const lit = TV().inferConfig({ headers: ['d'], rows: [['01/02/2026'], ['03/02/2026']] });
+            assertEq(lit.report.columns[0].reasons, ['multipleTemporalFormats'],
+                'cross-family ambiguity only; mixedPadding absent under a padded winner');
+            assertEq(lit.report.columns[0].observed.paddingStyle, null, 'padded winner → no paddingStyle');
+        },
+    });
+
+    U.push({
+        suite, name: 'decimalText advisory (§C.8): uniform dot-decimal float rides in reasons WITHOUT changing the high label; pins tolerance + pattern',
+        fn: ({ assert, assertEq }) => {
+            const money = TV().inferConfig({ headers: ['amt'], rows: [['1.50'], ['2.00'], ['3.25']] });
+            const c = money.report.columns[0];
+            assertEq(c.inferredType, 'float', 'money-shaped text is float');
+            assertEq(c.confidence, 'high',
+                'decimalText is advisory — the high label is UNCHANGED (the one reason that can accompany high)');
+            assertEq(c.reasons, ['decimalText'], 'the advisory reason is appended');
+            assertEq(money.report.suggestions.tolerances,
+                [{ column: 'amt', suggested: 0.005, basis: 'observedPrecision:2' }],
+                'mandatory + pinned: 0.5×10^−k = 0.005, basis observedPrecision:2');
+            assertEq(money.report.suggestions.patterns,
+                [{ column: 'amt', suggested: '0.00', basis: 'decimals:2,participants:3' }],
+                'the §C.7 pattern suggestion rides beside it (unanimity holds by construction)');
+            assertN1(assert, money.draft, 'decimalText');
+            // varying fractional-digit count → NO advisory (the predicate needs one uniform scale)
+            const mixedK = TV().inferConfig({ headers: ['amt'], rows: [['1.5'], ['2.50']] });
+            assert(!mixedK.report.columns[0].reasons.includes('decimalText'), 'mixed k → no advisory');
+            // grouping-ambiguous shape does NOT fire (it also reads as a grouped integer)
+            const ga = TV().inferConfig({ headers: ['amt'], rows: [['1.234'], ['5.678']] });
+            assert(ga.report.columns[0].reasons.includes('groupingAmbiguity'), 'this shape is grouping-ambiguous');
+            assert(!ga.report.columns[0].reasons.includes('decimalText'), 'grouping-ambiguous shapes are not settled money evidence');
         },
     });
 

@@ -889,4 +889,70 @@
         const bothString = TV().compare(schema, T2([['1', 'x', '5']]), T2([['1', 'x', '5']]));
         t.assertEq(bothString.diff.rows[0].cells.amount.tier, 'exact', 'string vs string, identical raw → exact');
     });
+
+    // ---- v1.5.0: exact-decimal evaluation (Core §15.8, fields.<col>.exact) ----
+
+    U('compare exact (§15.8) — text tolerance boundary passes in exact decimal; Δ/tolerance recorded as exact strings', (t) => {
+        const schema = baseSchema({
+            match: { keys: ['id'] },
+            fields: { amount: { tolerance: 0.1, exact: true } },
+            severity: { toleranceMatch: 'warning', valueMismatch: 'error' },
+        });
+        // |2.13 − 2.03| = 0.10 sits exactly on the 0.1 boundary — passes as toleranceMatch
+        const r = TV().compare(schema, T([['1', 'x', '2.13']]), T([['1', 'x', '2.03']]));
+        const cd = r.diff.rows[0].cells.amount;
+        t.assertEq(cd.tier, 'toleranceMatch', 'boundary Δ = ε passes exactly (no binary64 wobble)');
+        t.assertEq(cd.delta, '0.10', 'delta recorded as an exact decimal STRING');
+        t.assertEq(cd.tolerance, '0.1', 'tolerance recorded as an exact decimal STRING (0.1 = decimal 0.1)');
+        t.assertEq(cd.exactFallback, null, 'text-vs-text pair was evaluated exactly, not via fallback');
+        t.assertEq(r.summary.bySeverity.warning, 1, 'toleranceMatch → warning per config');
+    });
+
+    U('compare exact (§15.8) — distinct decimals collapsing to one binary64 no longer report interpretedMatch; exact:false still does (proves opt-in)', (t) => {
+        const sev = { interpretedMatch: 'warning', valueMismatch: 'error' };
+        // "9007199254740993.00" and "...992.00" are different decimals but the same binary64
+        const p = T([['1', 'x', '9007199254740993.00']]), e = T([['1', 'x', '9007199254740992.00']]);
+        const exact = TV().compare(baseSchema({ match: { keys: ['id'] }, fields: { amount: { exact: true } }, severity: sev }), p, e);
+        t.assertEq(exact.diff.rows[0].cells.amount.tier, 'valueMismatch', 'exact decimal distinguishes them → different');
+        t.assertEq(exact.summary.bySeverity.error, 1, 'valueMismatch → error');
+        const loose = TV().compare(baseSchema({ match: { keys: ['id'] }, fields: { amount: { exact: false } }, severity: sev }), p, e);
+        t.assertEq(loose.diff.rows[0].cells.amount.tier, 'interpretedMatch', 'exact:false collapses onto one binary64 → equal');
+    });
+
+    U('compare exact (§15.8) — C4 rejects exact on a string column; C6 keeps `exact` a non-severity key', (t) => {
+        // C4: exact:true only on int/float columns → schemaInvalid abort
+        const onString = TV().compare(
+            baseSchema({ match: { keys: ['id'] }, fields: { name: { exact: true } } }),
+            T([['1', 'a', '1.0']]), T([['1', 'a', '1.0']]));
+        t.assertEq(onString.aborted, true, 'exact on a string column aborts');
+        t.assertEq(onString.abortReason, 'schemaInvalid', 'C4 violation → schemaInvalid');
+        // C6: `exact` is NOT a configurable severity key (that behavior is unchanged)
+        const asSeverity = TV().compare(
+            baseSchema({ match: { keys: ['id'] }, severity: { exact: 'warning' } }),
+            T([['1', 'a', '1.0']]), T([['1', 'a', '1.0']]));
+        t.assertEq(asSeverity.aborted, true, 'exact as a severity key aborts');
+        t.assertEq(asSeverity.abortReason, 'schemaInvalid', 'unknown severity key (incl. exact) → schemaInvalid');
+        // exact:false on a string column is inert and accepted (like a null tolerance)
+        const inert = TV().compare(
+            baseSchema({ match: { keys: ['id'] }, fields: { name: { exact: false } } }),
+            T([['1', 'a', '1.0']]), T([['1', 'a', '1.0']]));
+        t.assertEq(inert.aborted, false, 'exact:false is inert and accepted anywhere');
+    });
+
+    U('compare exact (§15.8) — a native-number cell in the pair falls back to binary64 and records exactFallback', (t) => {
+        const schema = baseSchema({
+            match: { keys: ['id'] },
+            fields: { amount: { exact: true } },
+            severity: { interpretedMatch: 'warning', valueMismatch: 'error' },
+        });
+        // produced native 1.5, expected text "1.50": no exact text for the native side → binary64
+        const r = TV().compare(schema, T([['1', 'x', 1.5]]), T([['1', 'x', '1.50']]));
+        const cd = r.diff.rows[0].cells.amount;
+        t.assertEq(cd.exactFallback, 'binary64', 'native-cell pair records the binary64 fallback');
+        t.assertEq(cd.tier, 'interpretedMatch', '1.5 vs "1.50" are binary64-equal → interpretedMatch');
+        // a purely text pair on the same column carries exactFallback null
+        const txt = TV().compare(schema, T([['1', 'x', '1.50']]), T([['1', 'x', '1.5']]));
+        t.assertEq(txt.diff.rows[0].cells.amount.exactFallback, null, 'text-vs-text pair: no fallback');
+        t.assertEq(txt.diff.rows[0].cells.amount.tier, 'interpretedMatch', '"1.50" == "1.5" exactly (scale-insensitive)');
+    });
 })();
