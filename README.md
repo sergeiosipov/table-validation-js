@@ -69,9 +69,10 @@ two single-file variants pull everything else from the pinned CDN tag:
   ZIP (`<file>.config.json` per success, optional `<file>.report.json` evidence, and a
   `manifest.json` naming every input with its outcome — failures included, never silently
   dropped) — or as one **combined XLSX review workbook**: a sheet per inferred file with
-  the inferred column metadata (type, format, precision, nullable, confidence, sample
-  evidence, candidate keys, alternatives) sitting above the full ingested data. Files are
-  read locally in the browser and never leave the machine. This one is hand-authored
+  the inferred column metadata (type, format, precision, nullable, confidence, `reasons`,
+  candidate keys, alternatives, suggested tolerance) sitting above the full ingested data —
+  the `reasons` column names *why* a column landed where it did, in the same codes the guide
+  documents. Files are read locally in the browser and never leave the machine. This one is hand-authored
   (its UI *is* the file), with the engine pinned to the tag like the others; drafts are
   suggestions — review them in the console.
 

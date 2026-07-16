@@ -49,6 +49,17 @@ def row_topfreq(sheetxml, r, shared, meta_cols):
         vals.append(shared[int(vm.group(1))] if 't="s"' in attrs else _html.unescape(vm.group(1)))
     return vals
 
+
+def cell_text(sheetxml, ref, shared):  # ref like 'H4'; resolves a single cell to its string
+    m = re.search(r'<c r="%s"([^>]*)>(.*?)</c>' % ref, sheetxml, re.S)
+    if not m:
+        return None
+    attrs, inner = m.group(1), m.group(2)
+    vm = re.search(r"<v>(.*?)</v>", inner, re.S)
+    if not vm:
+        return None
+    return shared[int(vm.group(1))] if 't="s"' in attrs else _html.unescape(vm.group(1))
+
 repo = pathlib.Path(__file__).resolve().parents[2]
 url = (repo / "batch-infer-standalone.html").as_uri()
 browser_name = sys.argv[1] if len(sys.argv) > 1 else "chromium"
@@ -137,23 +148,41 @@ with sync_playwright() as p:
     assert wbxml.count("<sheet ") == 3, "Summary + one sheet per inferred file"
     assert wbxml.index('name="Summary"') < wbxml.index('name="clean"'), "Summary must be the FIRST sheet"
     shared = x.read("xl/sharedStrings.xml").decode("utf-8")
-    for needle in ("inferred type", "format", "precision", "nullable", "confidence",
-                   "candidate key", "alternatives", "date", "float", "yyyy-MM-dd", "North",
-                   "top_freq_val_1", "top_freq_val_10"):
+    for needle in ("inferred type", "format", "precision", "nullable", "confidence", "reasons",
+                   "candidate key", "alternatives", "suggested tolerance", "date", "float",
+                   "yyyy-MM-dd", "North", "top_freq_val_1", "top_freq_val_10"):
         assert needle in shared, f"combined XLSX lacks '{needle}' (metadata block, Summary, or data rows missing)"
-    # Summary (first worksheet part): header autofilter over all 21 columns, freeze pane
+    # Summary (first worksheet part): header autofilter over all 23 columns, freeze pane
     # below the header and before the top_freq_val_* columns, no wrapped cells, fitted widths
     sm = x.read("xl/worksheets/sheet1.xml").decode("utf-8")
-    assert '<autoFilter ref="A1:U1"' in sm, "Summary autofilter missing/misplaced"
-    assert 'xSplit="11"' in sm and 'ySplit="1"' in sm, "Summary freeze pane must sit after the metadata columns and below the header"
+    assert '<autoFilter ref="A1:W1"' in sm, "Summary autofilter missing/misplaced"
+    assert 'xSplit="13"' in sm and 'ySplit="1"' in sm, "Summary freeze pane must sit after the metadata columns and below the header"
     assert 'wrapText="1"' not in sm, "Summary cells must not wrap"
     assert "<cols>" in sm, "Summary columns must carry fitted widths"
+    # v1.5.1: reasons + suggested-tolerance land at their SUM_META header positions (H, M)
+    shared_list = shared_strings(shared)
+    assert cell_text(sm, "H1", shared_list) == "reasons", \
+        f"'reasons' header not at column H: {cell_text(sm, 'H1', shared_list)!r}"
+    assert cell_text(sm, "M1", shared_list) == "suggested tolerance", \
+        f"'suggested tolerance' header not at column M: {cell_text(sm, 'M1', shared_list)!r}"
+    # Regression-lock the user's exact complaint (flagged columns must carry an explanation):
+    # clean.csv's `amount` is uniform 2-dp money text, so the v1.5.0 engine appends reason
+    # `decimalText` and the report-only suggested tolerance 0.005 (§C.8) — these must reach the
+    # Summary's reasons/suggested-tolerance cells for that column.
+    amount_row = next((r for r in range(2, 8)
+                       if cell_text(sm, f"B{r}", shared_list) == "amount"), None)
+    assert amount_row, "amount column row not found in Summary"
+    assert cell_text(sm, f"H{amount_row}", shared_list) == "decimalText", \
+        f"amount reasons cell must read 'decimalText': {cell_text(sm, f'H{amount_row}', shared_list)!r}"
+    assert cell_text(sm, f"M{amount_row}", shared_list) == "0.005", \
+        f"amount suggested-tolerance cell must read '0.005': {cell_text(sm, f'M{amount_row}', shared_list)!r}"
     # per-file sheets: data-header autofilter + the type/nullable review dropdowns
     pf = x.read("xl/worksheets/sheet2.xml").decode("utf-8")
     assert "<autoFilter " in pf, "per-file data header autofilter missing"
     assert 'type="list"' in pf and "string,int,float,bool" in pf and "true,false" in pf, \
         "type/nullable dropdown validations missing"
-    print(f"[{browser_name}] combined XLSX: Summary-first (autofilter, freeze L2, top-freq columns) "
+    print(f"[{browser_name}] combined XLSX: Summary-first (autofilter, freeze N2, reasons+tolerance "
+          f"columns, amount reasons='decimalText'/tol=0.005, top-freq columns) "
           f"+ 2 file sheets with dropdowns verified")
 
     # ---- folder pick over docs/examples: recursion + relative paths + honest failure
@@ -191,12 +220,12 @@ with sync_playwright() as p:
     fx = zipfile.ZipFile(fpath)
     shared = shared_strings(fx.read("xl/sharedStrings.xml").decode("utf-8"))
     sheet1 = fx.read("xl/worksheets/sheet1.xml").decode("utf-8")  # Summary is first
-    # Summary rows: row1 header, row2 = grade column, row3 = note column. SUM_META has 11 cols.
-    grade_top = row_topfreq(sheet1, 2, shared, 11)
+    # Summary rows: row1 header, row2 = grade column, row3 = note column. SUM_META has 13 cols.
+    grade_top = row_topfreq(sheet1, 2, shared, 13)
     # A occurs twice (frequency winner); Y and X tie at 1 and keep FIRST-SEEN order (Y before X,
     # which is NOT alphabetical) — pins full-column frequency + stable tie order at once.
     assert grade_top[:3] == ["A", "Y", "X"], f"frequency winner / first-seen tie order wrong: {grade_top}"
-    note_top = row_topfreq(sheet1, 3, shared, 11)
+    note_top = row_topfreq(sheet1, 3, shared, 13)
     trunc = "x" * 79 + "…"
     assert note_top and note_top[0] == trunc, f"80-char truncation wrong: {note_top[:1]!r}"
     # bold + tinted Summary header land in styles.xml

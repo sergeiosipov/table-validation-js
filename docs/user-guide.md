@@ -662,7 +662,11 @@ many files (or a whole folder — it recurses and filters to the supported exten
 infers one draft config per file, and downloads everything as one ZIP (a config and
 optional evidence report per file, plus a `manifest.json` that lists every input with its
 outcome, failures included) or as one combined **XLSX review workbook** — a sheet per file
-with the inferred column metadata above the ingested data. Drafts are still suggestions;
+with the inferred column metadata above the ingested data. That metadata carries a **reasons**
+column — the same codes the [*Reading the offer*](#reading-the-offer-confidence-and-reasons)
+list spells out (chapter 9), so an `ambiguous` or otherwise flagged column always explains
+itself on the sheet — and a **suggested tolerance** column surfacing the same report-only
+precision suggestion the console offers as an adoption chip. Drafts are still suggestions;
 review the interesting ones back in this console. The tool documents itself on its own page
 (its whole UI is one screen), so this guide only points at it. Get it from the release
 archive of the pinned tag, or copy the single file from the repository — note it **cannot**
