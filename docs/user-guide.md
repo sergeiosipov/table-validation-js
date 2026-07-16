@@ -501,6 +501,14 @@ codes you can search this guide for:
 - `mixedTemporalFormats` / `mixedNumberFormats` — union coverage (above): several formats
   were needed, so the winner is a judgment call.
 - `twoDigitYear` — a `yy` format won; the century is a guess (see *Two-digit years* below).
+- `mixedPadding` — a date column mixing **padded and unpadded** spellings of the *same*
+  component (`01/02/2026` alongside `1/02/2026` — usually two upstream producers writing into
+  one feed). The winner is still correct — the tightest accepting format, e.g. `d/MM/yyyy` — but
+  confidence drops to `ambiguous` with **no** ranked alternative: the padded family-mate
+  (`dd/MM/yyyy`) doesn't accept the whole sample, so adopting it would be a trap. Contrast a
+  consistently *unpadded* column like `{1/01/2026, 22/12/2026}`, which keeps `high` — the
+  two-digit `22` is the day's *required* spelling, not padding, so there is no style mixing to
+  flag (Addendum §C.4).
 - `digitDate` — an 8-digit int column (`20260715`) that also parses as a `yyyyMMdd` date;
   `int` still wins, but the date reading rides along as a ranked alternative.
 - `groupingAmbiguity` — every value looks like `1.234`, which reads equally as the decimal
@@ -516,6 +524,14 @@ codes you can search this guide for:
   or like dates/times (`9:05`, `15-Jul-2026`). The type is unchanged — the label just tells
   you the fallback wasn't a boring text column, so it may deserve a second look. One is
   visible on the `order_date` row of the chapter-3 offer screenshot.
+- `decimalText` *(advisory — the one reason that never changes confidence)*: a `float` column
+  that is uniformly money-shaped — every value a dot-decimal string with the **same** number of
+  decimals (`12.34`, `5.60`, `100.00`). Unlike the ambiguity reasons above it never demotes a
+  column — a `high` column stays `high`, and this is the only reason that ever rides *alongside*
+  `high`. It is a nudge, not a doubt: when it fires the report hands you the decimal-scale
+  **tolerance** it computes (`0.005` for two decimals) and the spelling **pattern** (`0.00`), so
+  you can pin them before summing or comparing — see *Money and decimal precision* below
+  (Addendum §C.8).
 
 Two report-only extras never touch the draft. **Suggested tolerances** appear as the
 adoption chips above; **suggested patterns** (new in 1.4.0) — a spelling like `#,##0.00`
@@ -578,6 +594,41 @@ Type `(1 234,50)` and it reads the parentheses as `negativeStyle`, the space as 
 and the comma as the decimal. When an example is genuinely ambiguous — `1.234` is a
 decimal *or* a grouped integer — the box offers **both** compiled formats and lets you pick
 the intended one, rather than guessing. It only ever *appends*; your existing formats stay.
+
+### Money and decimal precision
+
+For a **text** feed, `float` is a decimal-*text* contract: whether a cell is accepted, and its
+`precision`, are decided by counting characters on the value **as written** — no binary64 float
+is ever formed to make that call (core spec §6.3, §3.5). That is why `"5.60"` is a two-decimal
+value and `"5.6"` a one-decimal value, and the `precision` rule can tell them apart.
+
+Binary64 (the machine `double`) enters the *verdict arithmetic* in exactly **three** places, and
+only there can a result differ from exact-decimal truth at the last digit:
+
+- the `value` **range bounds** on a numeric column (the interpreted number is compared against
+  the schema's numeric bounds);
+- the **`sumEquals`** table check (core spec §7.2);
+- **`compare()`**'s equality and tolerance arithmetic (core spec §15.8).
+
+For money feeds that last-cent edge is exactly where rounding bites. The classic bite: ten
+`"0.10"` cells summed against a `sumEquals` expecting `1.00` **fail** at the default
+`tolerance: 0`, because `0.1` has no exact binary64 and the ten of them accumulate to `0.9999…`.
+
+**The 1.5.0 fix — opt-in, default off** (every existing config behaves byte-for-byte as before):
+
+- **`sumEquals` with `exact: true`** sums decimal-text cells in exact decimal — the ten `"0.10"`
+  cells make exactly `1.00` and pass at `tolerance: 0` (core spec §7.2).
+- **a comparison column with `exact: true`** — `comparison.fields.<col>.exact` — makes that
+  column's equality and tolerance exact-decimal for text-vs-text cells: two decimals that happen
+  to collapse onto the same `double` no longer read as equal, and a boundary like `2.13` vs
+  `2.03` at tolerance `0.1` lands exactly on the line (core spec §15.8).
+
+Both switches govern **decimal-text** cells only. A **native number** cell — one that arrived
+already a number, e.g. ingested from an Excel `.xlsx` — carries no exact text to honor, so it
+falls back to binary64 for that pair or row, and the result records which rows fell back. When a
+column is uniformly money-shaped, the inference offer flags it with the `decimalText` advisory
+(above) and hands you the decimal-scale tolerance and pattern to pin before you turn either
+switch on.
 
 ### Two-digit years and the century pivot
 
@@ -740,6 +791,7 @@ The mess → what to do in the console:
 | `NA`, `N/A`, `-`, empty — the null-token zoo | `nullEquivalents` (inference adopts observed tokens; one-click adoption); normalization `nullCoerce` for real nulls | [3](#3-fast-path-file--verdict-in-three-clicks), [9](#9-power-features) |
 | One column, two date spellings | infer with **all accepting formats**, or list several `formats` on the column | [9](#9-power-features), [6](#6-editing-the-config-by-hand) |
 | Unpadded dates (`1.7.2026`) or `yyyyMMdd` digit dates | inference handles unpadded day/month (`d.M.yyyy`); 8-digit date-like int columns get a flagged date alternative in the offer | [3](#3-fast-path-file--verdict-in-three-clicks), [9](#9-power-features) |
+| One date column mixing padded and unpadded (`01/02/2026` next to `1/02/2026`) | the winner is still the tightest accepting format; the offer flags it **ambiguous** (reason `mixedPadding`) with no alternative — a consistently unpadded column (`22/12/2026`) stays `high` | [9](#9-power-features) |
 | Region written once per block, blanks below | normalization `fillDown` on the column | [5](#5-cleaning-messy-data-normalization) |
 | Leading-zero ids (`"007"`) | declare the column `string` — an int column would read it as `7` | [6](#6-editing-the-config-by-hand) |
 | Word/Excel artifacts (NBSP, curly quotes, long dashes) | normalization `replaceChars` with an exact substitution map | [5](#5-cleaning-messy-data-normalization) |
@@ -747,6 +799,7 @@ The mess → what to do in the console:
 | Duplicate match keys in a comparison | `onDuplicateKey: reportAndExclude` — one error per key group, rows set aside, run continues | [7](#7-comparing-two-tables) |
 | The golden file names the column differently | *expected header (alias)* on the column's comparison options | [7](#7-comparing-two-tables) |
 | Cent-level rounding differences | *tolerance* on the numeric column (inference suggests one) | [7](#7-comparing-two-tables), [9](#9-power-features) |
+| Money sums/compares off by a cent (ten `0.10` cells ≠ `1.00`) | `float` acceptance is lexical, but `sumEquals`/`compare()` do binary64 math; set `exact: true` (new in 1.5.0, opt-in, default off) for exact-decimal sums and comparisons on decimal-text feeds | [9](#9-power-features) |
 | Amounts must keep exactly N decimals | *suggest precision* (on by default) drafts the observed bounds | [9](#9-power-features) |
 | Decimals without a leading zero (`.85`) | inference drafts a NumberFormat with `allowBareDecimal` — validation reads `.85` as `0.85` | [9](#9-power-features) |
 | Accounting negatives (`(1,234.50)`) or SAP trailing minus (`1234.50-`) | inference drafts a NumberFormat with `negativeStyle` — validation reads both as `-1234.50`; a column mixing `-x` and `(x)` takes two formats in the array | [9](#9-power-features) |
