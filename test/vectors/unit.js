@@ -14,11 +14,11 @@
         const r = TV().validate(SIMPLE(), { headers: ['a'], rows: [] });
         t.assertEq(r.specVersion, TV().SPEC_VERSION, 'result.specVersion');
     });
-    U('drafts and builder seed stamp the CURRENT spec version (1.5.0)', (t) => {
+    U('drafts and builder seed stamp the CURRENT spec version (1.5.1)', (t) => {
         // v1.3.1 shipped drafts stamping a stale '1.3.0' — pin both stamps to the
         // constant so a missed bump can never ship silently again. The ONE literal
         // release pin of the suite lives here (release-check enforces its presence):
-        t.assertEq(TV().SPEC_VERSION, '1.5.0', 'release literal');
+        t.assertEq(TV().SPEC_VERSION, '1.5.1', 'release literal');
         const seed = TV().createConfigBuilder().build();
         t.assertEq(seed.meta.schemaVersion, TV().SPEC_VERSION, 'builder default seed schemaVersion');
         const inf = TV().inferConfig({ headers: ['a'], rows: [['1'], ['2'], ['3']] });
