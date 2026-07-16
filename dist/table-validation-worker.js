@@ -1,5 +1,5 @@
 /*!
- * table-validation-worker v1.4.0 — classic Web Worker wrapper for the table-validation
+ * table-validation-worker v1.5.0 — classic Web Worker wrapper for the table-validation
  * engine (Browser JS profile). Hand-authored vanilla ES2020; no build step; CDN-fetchable
  * from the same tag as dist/table-validation.js.
  * License: MIT.

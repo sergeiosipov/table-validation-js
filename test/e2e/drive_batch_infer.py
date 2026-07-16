@@ -78,7 +78,7 @@ with sync_playwright() as p:
     page.goto(url)
     page.wait_for_function("() => !!window.__tvbatch", timeout=60000)
     assert cdn_engine, "engine was not fetched from the pinned CDN tag"
-    assert "v1.4.0" in page.inner_text("#ver"), "engine version banner missing"
+    assert "v1.5.0" in page.inner_text("#ver"), "engine version banner missing"
 
     # ---- multi-file pick: mixed outcomes
     page.set_input_files("#inFiles", [str(tmp / n) for n in
@@ -115,11 +115,11 @@ with sync_playwright() as p:
                      "records.config.json", "records.report.json"], f"zip contents: {names}"
     for n in ("clean.config.json", "records.config.json"):
         cfg = json.loads(z.read(n))
-        assert cfg["meta"]["schemaVersion"] == "1.4.0" and cfg["columns"], f"{n} malformed"
+        assert cfg["meta"]["schemaVersion"] == "1.5.0" and cfg["columns"], f"{n} malformed"
     manifest = json.loads(z.read("manifest.json"))
     mstat = {f["file"]: f["status"] for f in manifest["files"]}
     assert mstat == st, f"manifest disagrees with the UI: {mstat}"
-    assert manifest["files"] and manifest["engineVersion"] == "1.4.0"
+    assert manifest["files"] and manifest["engineVersion"] == "1.5.0"
     failed = next(f for f in manifest["files"] if f["file"] == "broken.xlsx")
     assert failed["error"]["code"] == "formatMismatch", f"manifest error detail: {failed}"
     print(f"[{browser_name}] files mode: 2 inferred, 1 failed, 1 skipped; ZIP verified "
