@@ -955,4 +955,80 @@
         t.assertEq(txt.diff.rows[0].cells.amount.exactFallback, null, 'text-vs-text pair: no fallback');
         t.assertEq(txt.diff.rows[0].cells.amount.tier, 'interpretedMatch', '"1.50" == "1.5" exactly (scale-insensitive)');
     });
+
+    U('compare exact (§15.8) — "-0" vs "0" is scale-insensitive interpretedMatch under exact decimal', (t) => {
+        const schema = baseSchema({ match: { keys: ['id'] }, fields: { amount: { exact: true } } });
+        const r = TV().compare(schema, T([['1', 'x', '-0']]), T([['1', 'x', '0']]));
+        const cd = r.diff.rows[0].cells.amount;
+        t.assertEq(cd.tier, 'interpretedMatch', 'negative-zero text collapses onto zero exactly');
+        t.assertEq(cd.exactFallback, null, 'text-vs-text pair: no fallback');
+    });
+
+    U('compare exact (§15.8) — absolute-tolerance just-over the boundary is valueMismatch (2.14 vs 2.03, tol 0.1)', (t) => {
+        const schema = baseSchema({
+            match: { keys: ['id'] },
+            fields: { amount: { tolerance: 0.1, exact: true } },
+            severity: { toleranceMatch: 'warning', valueMismatch: 'error' },
+        });
+        // |2.14 - 2.03| = 0.11 > 0.1: one exact-decimal cent over the boundary
+        const r = TV().compare(schema, T([['1', 'x', '2.14']]), T([['1', 'x', '2.03']]));
+        const cd = r.diff.rows[0].cells.amount;
+        t.assertEq(cd.tier, 'valueMismatch', 'just-over the exact-decimal boundary fails');
+        t.assertEq(r.summary.bySeverity.error, 1, 'valueMismatch -> error');
+    });
+
+    U('compare exact (§15.8) — percent, field, and fn tolerance forms all evaluate against exact-decimal cells', (t) => {
+        // percent: ε = |value(of)| x percent/100, "of" read from the EXPECTED row by default
+        const pctSchema = baseSchema({
+            match: { keys: ['id'] },
+            fields: { amount: { tolerance: { percent: 0.5, of: 'amount' }, exact: true } },
+            severity: { toleranceMatch: 'warning', valueMismatch: 'error' },
+        });
+        // 0.5% of 200.00 = 1.00 -> boundary Δ = ε passes exactly
+        const pass = TV().compare(pctSchema, T([['1', 'x', '201.00']]), T([['1', 'x', '200.00']]));
+        const pcd = pass.diff.rows[0].cells.amount;
+        t.assertEq(pcd.tier, 'toleranceMatch', '0.5% of 200.00 = 1.00: Δ = ε passes');
+        t.assertEq(pcd.delta, '1.00', 'delta an exact decimal string');
+        t.assertEq(pcd.tolerance, '1.00000', 'tolerance an exact decimal string (scale grows through the percent/100 shift)');
+        // one cent further breaks it
+        const fail = TV().compare(pctSchema, T([['1', 'x', '201.01']]), T([['1', 'x', '200.00']]));
+        t.assertEq(fail.diff.rows[0].cells.amount.tier, 'valueMismatch', '201.01 is over the 1.00 percent-tolerance');
+
+        // field form: tolerance value driven by another column's cell, read exactly
+        const fieldSchema = {
+            meta: META, resultConfig: { collectCellRegister: true }, evaluation: { strictType: false, timezone: 'utc' },
+            structure: { columnMatching: 'byName' },
+            columns: { id: { type: { name: 'int' } }, tol: { type: { name: 'float' } }, amount: { type: { name: 'float' } } },
+            comparison: {
+                match: { keys: ['id'] },
+                fields: { amount: { tolerance: { field: 'tol' }, exact: true } },
+                severity: { toleranceMatch: 'warning', valueMismatch: 'error' },
+            },
+        };
+        const T2 = (rows) => ({ headers: ['id', 'tol', 'amount'], rows });
+        const fr = TV().compare(fieldSchema, T2([['1', '0.10', '2.20']]), T2([['1', '0.10', '2.10']]));
+        const fcd = fr.diff.rows[0].cells.amount;
+        t.assertEq(fcd.tier, 'toleranceMatch', 'field-driven tolerance: Δ = 0.10 = ε passes');
+        t.assertEq(fcd.delta, '0.10', 'delta an exact decimal string');
+        t.assertEq(fcd.tolerance, '0.10', 'tolerance re-read exactly from the driving text cell (scale 2)');
+
+        // fn form: the tolerance value is the function's own (binary64) return, re-rendered
+        const fnSchema = baseSchema({
+            match: { keys: ['id'] },
+            fields: { amount: { tolerance: { fn: 'myTol' }, exact: true } },
+            severity: { toleranceMatch: 'warning', valueMismatch: 'error' },
+        });
+        const nr = TV().compare(fnSchema, T([['1', 'x', '2.15']]), T([['1', 'x', '2.05']]), { functions: { myTol: () => 0.1 } });
+        const ncd = nr.diff.rows[0].cells.amount;
+        t.assertEq(ncd.tier, 'toleranceMatch', 'fn-driven tolerance: Δ = 0.10 <= ε = 0.1 passes');
+        t.assertEq(ncd.delta, '0.10', 'delta (from the exact-decimal text cells) is still an exact string');
+        t.assertEq(ncd.tolerance, '0.1', 'tolerance re-rendered from the fn\'s own return value');
+    });
+
+    U('compare exact (§15.8) — exact:true is accepted (not aborted) on an int/float column with no other settings', (t) => {
+        const schema = baseSchema({ match: { keys: ['id'] }, fields: { amount: { exact: true } } });
+        const r = TV().compare(schema, T([['1', 'x', '1.00']]), T([['1', 'x', '1.00']]));
+        t.assertEq(r.aborted, false, 'exact:true on a float column never aborts (C4)');
+        t.assertEq(r.diff.rows[0].cells.amount.tier, 'exact', 'identical exact-decimal text still ties exact');
+    });
 })();

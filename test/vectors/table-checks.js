@@ -224,6 +224,181 @@
     });
 
     V({
+        name: 'sumEquals exact (§7.2, 1.5.0) — expectedField total: "0.10"+"0.20"+"0.30" sums to exactly "0.60"; exact:false fails on binary64 drift',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            nullHandling: { nullEquivalents: [''] },
+            columns: {
+                x: { nullable: true, type: { name: 'float' } },
+                total: { nullable: true, type: { name: 'float' } },
+            },
+            customTableChecks: [{
+                name: 's', type: 'sumEquals', fields: ['x'],
+                expectedValue: null, expectedField: 'total', expectedFieldRow: 'last', tolerance: 0, exact: true,
+            }],
+        },
+        table: { headers: ['x', 'total'], rows: [['0.10', ''], ['0.20', ''], ['0.30', '0.60']] },
+        expect: { valid: true, summary: { bySeverity: { error: 0, warning: 0 } } },
+    });
+
+    V({
+        name: 'sumEquals exact opt-in (§7.2, 1.5.0) — the SAME expectedField sum FAILS with exact:false (0.1+0.2+0.3 !== 0.6 in binary64)',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            nullHandling: { nullEquivalents: [''] },
+            columns: {
+                x: { nullable: true, type: { name: 'float' } },
+                total: { nullable: true, type: { name: 'float' } },
+            },
+            customTableChecks: [{
+                name: 's', type: 'sumEquals', fields: ['x'],
+                expectedValue: null, expectedField: 'total', expectedFieldRow: 'last', tolerance: 0, exact: false,
+            }],
+        },
+        table: { headers: ['x', 'total'], rows: [['0.10', ''], ['0.20', ''], ['0.30', '0.60']] },
+        expect: {
+            valid: false,
+            summary: {
+                bySeverity: { error: 1, warning: 0 },
+                details: [{
+                    ruleName: 'sumEquals:s', fieldName: 'x', count: 3,
+                    context: { expectedSum: 0.6, actualSum: 0.6000000000000001, tolerance: 0 },
+                }],
+            },
+        },
+    });
+
+    V({
+        name: 'sumEquals exact (§7.2, 1.5.0) — negative addends: "1.50" + "-0.50" sums exactly to 1.00',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { x: { type: { name: 'float' } } },
+            customTableChecks: [{
+                name: 's', type: 'sumEquals', fields: ['x'],
+                expectedValue: 1.00, expectedField: null, tolerance: 0, exact: true,
+            }],
+        },
+        table: { headers: ['x'], rows: [['1.50'], ['-0.50']] },
+        expect: { valid: true, summary: { bySeverity: { error: 0, warning: 0 } } },
+    });
+
+    V({
+        name: 'sumEquals exact (§7.2, 1.5.0) — scale-mixed addends: "1.5" + "2.25" sums exactly; actualSum renders "3.75" at scale 2 on failure',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { x: { type: { name: 'float' } } },
+            customTableChecks: [{
+                name: 's', type: 'sumEquals', fields: ['x'],
+                expectedValue: 3.76, expectedField: null, tolerance: 0, exact: true,   // deliberately WRONG to inspect actualSum
+            }],
+        },
+        table: { headers: ['x'], rows: [['1.5'], ['2.25']] },
+        expect: {
+            valid: false,
+            summary: {
+                bySeverity: { error: 1, warning: 0 },
+                details: [{
+                    ruleName: 'sumEquals:s', fieldName: 'x', count: 2,
+                    context: { expectedSum: '3.76', actualSum: '3.75', tolerance: 0, exact: true, binary64FallbackRows: [] },
+                    message: 'Rule "s": sum 3.75 ≠ expected 3.76 (±0)',
+                }],
+            },
+        },
+    });
+
+    V({
+        name: 'sumEquals exact (§7.2, 1.5.0) — a 2^53+1-scale collapse: "9007199254740993.00" + "1.00" sums exactly to "9007199254740994.00"; exact:false lands on the wrong, rounded total',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            nullHandling: { nullEquivalents: [''] },
+            columns: {
+                x: { nullable: true, type: { name: 'float' } },
+                total: { nullable: true, type: { name: 'float' } },
+            },
+            customTableChecks: [{
+                name: 's', type: 'sumEquals', fields: ['x'],
+                expectedValue: null, expectedField: 'total', expectedFieldRow: 'last', tolerance: 0, exact: true,
+            }],
+        },
+        table: { headers: ['x', 'total'], rows: [['9007199254740993.00', ''], ['1.00', '9007199254740994.00']] },
+        expect: { valid: true, summary: { bySeverity: { error: 0, warning: 0 } } },
+    });
+
+    V({
+        name: 'sumEquals exact opt-in (§7.2, 1.5.0) — the SAME 2^53+1-scale sum FAILS with exact:false: binary64 rounds "...993.00" down before it is ever summed',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            nullHandling: { nullEquivalents: [''] },
+            columns: {
+                x: { nullable: true, type: { name: 'float' } },
+                total: { nullable: true, type: { name: 'float' } },
+            },
+            customTableChecks: [{
+                name: 's', type: 'sumEquals', fields: ['x'],
+                expectedValue: null, expectedField: 'total', expectedFieldRow: 'last', tolerance: 0, exact: false,
+            }],
+        },
+        table: { headers: ['x', 'total'], rows: [['9007199254740993.00', ''], ['1.00', '9007199254740994.00']] },
+        expect: {
+            valid: false,
+            summary: {
+                bySeverity: { error: 1, warning: 0 },
+                details: [{
+                    ruleName: 'sumEquals:s', fieldName: 'x', count: 2,
+                    context: { expectedSum: 9007199254740994, actualSum: 9007199254740992, tolerance: 0 },
+                    message: 'Rule "s": sum 9007199254740992 ≠ expected 9007199254740994 (±0)',
+                }],
+            },
+        },
+    });
+
+    V({
+        name: 'sumEquals exact (§7.2, 1.5.0) — tolerance boundary: Δ = ε passes exactly; one thousandth further FAILS',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { x: { type: { name: 'float' } } },
+            customTableChecks: [{
+                name: 's', type: 'sumEquals', fields: ['x'],
+                expectedValue: 10.00, expectedField: null, tolerance: 0.05, exact: true,
+            }],
+        },
+        table: { headers: ['x'], rows: [['5.025'], ['5.025']] },   // sum 10.05, Δ = 0.05 = ε
+        expect: { valid: true, summary: { bySeverity: { error: 0, warning: 0 } } },
+    });
+
+    V({
+        name: 'sumEquals exact (§7.2, 1.5.0) — tolerance boundary: one thousandth over Δ = ε FAILS',
+        schema: {
+            meta: META, resultConfig: RC,
+            evaluation: { strictType: false, timezone: 'utc' },
+            columns: { x: { type: { name: 'float' } } },
+            customTableChecks: [{
+                name: 's', type: 'sumEquals', fields: ['x'],
+                expectedValue: 10.00, expectedField: null, tolerance: 0.05, exact: true,
+            }],
+        },
+        table: { headers: ['x'], rows: [['5.026'], ['5.025']] },   // sum 10.051, Δ = 0.051 > ε
+        expect: {
+            valid: false,
+            summary: {
+                bySeverity: { error: 1, warning: 0 },
+                details: [{
+                    ruleName: 'sumEquals:s', fieldName: 'x', count: 2,
+                    context: { expectedSum: '10.000', actualSum: '10.051', tolerance: 0.05, exact: true, binary64FallbackRows: [] },
+                    message: 'Rule "s": sum 10.051 ≠ expected 10.000 (±0.05)',
+                }],
+            },
+        },
+    });
+
+    V({
         name: 'custom table check — (row, field) fails become violations',
         schema: {
             meta: META, resultConfig: RC,

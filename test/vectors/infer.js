@@ -1143,4 +1143,117 @@
         },
     });
 
+    U.push({
+        suite, name: 'B027 (§C.4): mixedPadding + twoDigitYear composition — a disambiguated sole yy winner orders reasons [twoDigitYear, mixedPadding], carries no multipleTemporalFormats/alternative',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            // day 13 rules out the MM/dd reading outright -> sole accepting candidate
+            // (d/MM/yy); day evidence is genuinely mixed: 13 neutral (natural 2-digit,
+            // no leading zero), 1 unpadded, 05 padded
+            const t = { headers: ['d'], rows: [['13/07/26'], ['1/07/26'], ['05/07/26']] };
+            const { draft, report } = TV().inferConfig(t);
+            const c = report.columns[0];
+            assertEq(c.inferredType, 'date', 'winner is a date');
+            assertEq(draft.columns.d.type.formats, ['d/MM/yy'], '13 forces the day-first reading; sole winner');
+            assertEq(c.confidence, 'ambiguous', 'both twoDigitYear and mixedPadding keep this a reviewer judgment');
+            assertEq(c.reasons, ['twoDigitYear', 'mixedPadding'],
+                'fixed order: twoDigitYear before mixedPadding, and no multipleTemporalFormats -- there is no cross-family tie here');
+            assertEq(c.alternatives, [], 'sole accepter: neither signal adds an alternative');
+            assertEq(c.observed.paddingStyle, { day: { padded: 1, unpadded: 1, neutral: 1 } },
+                'only the day component carries evidence: the winner uses the strict MM token for month');
+            assertN1(assert, draft, 'yy-mixedPadding');
+            assert(TV().validate(draft, t).valid, 'the draft validates its own sample');
+        },
+    });
+
+    U.push({
+        suite, name: "B028 (§C.4): mixedPadding + union coverage — reasons [mixedTemporalFormats, mixedPadding]; evidence scope is the WINNER's own accepted participants",
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            // the slash family (1/07, 22/07, 05/07) reduces to d/MM/yyyy (count 3); the
+            // dotted '15.07.2026' is a separate family the slash winner does not accept,
+            // forcing union coverage. Padding evidence is scoped to the winner's own 3
+            // accepted participants: day 1 unpadded, 22 neutral, 05 padded.
+            const t = { headers: ['d'], rows: [['1/07/2026'], ['22/07/2026'], ['05/07/2026'], ['15.07.2026']] };
+            const { draft, report } = TV().inferConfig(t, { allAcceptingFormats: true });
+            const c = report.columns[0];
+            assertEq(c.inferredType, 'date', 'union coverage infers date');
+            assertEq(draft.columns.d.type.formats, ['d/MM/yyyy', 'dd.MM.yyyy', 'M/dd/yyyy'],
+                'winner (most-accepted) then the remaining used candidates in table order');
+            assertEq(c.confidence, 'ambiguous', 'union coverage is always ambiguous');
+            assertEq(c.reasons, ['mixedTemporalFormats', 'mixedPadding'], 'fixed order: mixedTemporalFormats before mixedPadding');
+            assertEq(c.observed.paddingStyle, { day: { padded: 1, unpadded: 1, neutral: 1 } },
+                "labeled by the winner's own loose token (day); the dotted row the winner rejects contributes no evidence");
+            assertN1(assert, draft, 'union-mixedPadding');
+            assert(TV().validate(draft, t).valid, 'the draft validates its own sample');
+        },
+    });
+
+    U.push({
+        suite, name: 'B029 (§C.4): mixedPadding orthogonality — genuinely high, disambiguated sole winners carry no mixedPadding reason',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            // all-padded, disambiguated by day 25 > 12: clean high, no reasons at all
+            const allPad = TV().inferConfig({ headers: ['d'], rows: [['01/02/2026'], ['25/12/2026']] });
+            assertEq(allPad.draft.columns.d.type.formats, ['dd/MM/yyyy'], 'padded winner');
+            assertEq(allPad.report.columns[0].confidence, 'high', 'genuinely high');
+            assertEq(allPad.report.columns[0].reasons, [], 'no mixedPadding on a padded (non-loose) winner token');
+            assertEq(allPad.report.columns[0].observed.paddingStyle, null, 'no paddingStyle');
+            // neutral-heavy sole winner: 25 forces the month-day reading (M/dd); the loose
+            // winner token is MONTH here (10, 11 neutral; 1 unpadded) and never sees padded
+            // evidence, so the signal cannot fire even though the column is genuinely mixed
+            const neutralHeavy = TV().inferConfig({ headers: ['d'], rows: [['10/25/2026'], ['11/25/2026'], ['1/25/2026']] });
+            assertEq(neutralHeavy.draft.columns.d.type.formats, ['M/dd/yyyy'], '25 disambiguates: month-day reading, day forced to strict dd');
+            assertEq(neutralHeavy.report.columns[0].confidence, 'high', 'genuinely high');
+            assertEq(neutralHeavy.report.columns[0].reasons, [], 'no mixedPadding: month evidence is unpadded+neutral only, no padded');
+            assertEq(neutralHeavy.report.columns[0].observed.paddingStyle, null, 'no paddingStyle');
+        },
+    });
+
+    U.push({
+        suite, name: 'B030 (§C.4): mixedPadding category boundaries — padded+neutral and neutral+unpadded stay silent; padded+unpadded fires; "10" pins the neutral boundary',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            // padded (01) + neutral (25), no unpadded evidence at all -> no fire (the
+            // winner is the strict dd/MM/yyyy, so the loose-day component is never examined)
+            const padNeutral = TV().inferConfig({ headers: ['d'], rows: [['01/02/2026'], ['25/02/2026']] });
+            assertEq(padNeutral.draft.columns.d.type.formats, ['dd/MM/yyyy'], 'strict winner: no loose-day evidence to examine');
+            assertEq(padNeutral.report.columns[0].confidence, 'high', 'disambiguated (25 > 12), no fire keeps it high');
+            assertEq(padNeutral.report.columns[0].reasons, [], 'padded+neutral only: no fire');
+            assertEq(padNeutral.report.columns[0].observed.paddingStyle, null, 'no paddingStyle');
+            // neutral (25) + unpadded (1), no padded evidence -> no fire
+            const neutralUnpad = TV().inferConfig({ headers: ['d'], rows: [['1/02/2026'], ['25/02/2026']] });
+            assertEq(neutralUnpad.draft.columns.d.type.formats, ['d/MM/yyyy'], 'loose winner forced by the unpadded day');
+            assertEq(neutralUnpad.report.columns[0].confidence, 'high', 'disambiguated (25 > 12), no fire keeps it high');
+            assertEq(neutralUnpad.report.columns[0].reasons, [], 'neutral+unpadded only: no fire');
+            assertEq(neutralUnpad.report.columns[0].observed.paddingStyle, null, 'no paddingStyle');
+            // padded (01) + unpadded (1) -> fires (day <= 12 both ways, so this also carries
+            // the ordinary cross-family ambiguity reason ahead of mixedPadding)
+            const fires = TV().inferConfig({ headers: ['d'], rows: [['1/02/2026'], ['01/03/2026']] });
+            assertEq(fires.draft.columns.d.type.formats, ['d/MM/yyyy'], 'loose winner');
+            assertEq(fires.report.columns[0].reasons, ['multipleTemporalFormats', 'mixedPadding'], 'padded+unpadded: fires, in fixed order');
+            assertEq(fires.report.columns[0].observed.paddingStyle, { day: { padded: 1, unpadded: 1, neutral: 0 } }, 'both categories present, no neutral');
+            // "10" pins the neutral boundary: a 2-digit day with no leading zero is neutral
+            // evidence, never padded -- so "10" alongside "01" stays a padded+neutral pair
+            const ten = TV().inferConfig({ headers: ['d'], rows: [['10/02/2026'], ['01/03/2026']] });
+            assertEq(ten.draft.columns.d.type.formats, ['dd/MM/yyyy'], 'both renderings are 2-digit; strict winner');
+            assertEq(ten.report.columns[0].reasons, ['multipleTemporalFormats'], '"10" and "01" both <= 12: cross-family ambiguity only, no mixedPadding');
+            assertEq(ten.report.columns[0].observed.paddingStyle, null, '"10" is neutral, not padded: no fire');
+            assertN1(assert, fires.draft, 'boundary-fires');
+            assert(TV().validate(fires.draft, { headers: ['d'], rows: [['1/02/2026'], ['01/03/2026']] }).valid, 'fires draft self-validates');
+        },
+    });
+
+    U.push({
+        suite, name: 'B031 (§C.8): decimalText advisory is suppressed the moment a native number breaks the all-string predicate',
+        fn: ({ assert, assertEq }) => {
+            const t = { headers: ['amt'], rows: [['12.34'], [5.60]] };
+            const { report } = TV().inferConfig(t);
+            const c = report.columns[0];
+            assertEq(c.inferredType, 'float', 'still infers float');
+            assertEq(c.confidence, 'high', 'unaffected by the native participant');
+            assertEq(c.reasons, [], 'no decimalText: the predicate requires EVERY participant to be a string');
+        },
+    });
+
 })();
