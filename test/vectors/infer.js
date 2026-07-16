@@ -1256,4 +1256,31 @@
         },
     });
 
+    U.push({
+        suite, name: 'B032 (§C.4): full three-reason append order — multipleTemporalFormats, twoDigitYear, mixedPadding together on one column',
+        needsLuxon: true,
+        fn: ({ assert, assertEq }) => {
+            // yy family, first components all <= 12: the day-month reading (winner, table
+            // order) and the month-day reading (M/dd/yy) both accept every participant, so
+            // the cross-family Ambiguity rule fires alongside the yy century guess AND the
+            // winner's own day component mixing padded (01, 03) with unpadded (1) -- all
+            // three signals land on the same column, exercising the normative append order.
+            const t = { headers: ['d'], rows: [['01/02/26'], ['1/02/26'], ['03/02/26']] };
+            const { draft, report } = TV().inferConfig(t);
+            const c = report.columns[0];
+            assertEq(c.inferredType, 'date', 'winner is a date');
+            assertEq(draft.columns.d.type, { name: 'date', formats: ['d/MM/yy'] },
+                'day-month family wins the cross-family tie by table order; "1" forces day to d, month settles to the tighter MM');
+            assertEq(c.confidence, 'ambiguous', 'all three signals keep this a reviewer judgment');
+            assertEq(c.reasons, ['multipleTemporalFormats', 'twoDigitYear', 'mixedPadding'],
+                'fixed append order: cross-family ambiguity, then the century guess, then the padding-style signal');
+            assertEq(c.alternatives, [{ type: 'date', formats: ['M/dd/yy'], rank: 1 }],
+                'the Ambiguity rule alone adds the alternative -- twoDigitYear and mixedPadding add none');
+            assertEq(c.observed.paddingStyle, { day: { padded: 2, unpadded: 1, neutral: 0 } },
+                "only the day component carries evidence: the winner's month token is the strict MM");
+            assertN1(assert, draft, 'yy-full-reason-order');
+            assert(TV().validate(draft, t).valid, 'the draft validates its own sample');
+        },
+    });
+
 })();
