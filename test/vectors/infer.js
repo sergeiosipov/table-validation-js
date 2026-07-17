@@ -1149,6 +1149,45 @@
     });
 
     U.push({
+        suite, name: 'suggestions.types (§C.8, 1.6.0) fires iff decimalText: mixed-scale and grouping-ambiguous columns carry NO entry; float draft + no ranked decimal alternative in all three',
+        fn: ({ assert, assertEq }) => {
+            // qualifying: uniform 2-dp money-shaped column
+            const money = TV().inferConfig({ headers: ['amt'], rows: [['1.50'], ['2.00'], ['3.25']] });
+            assertEq(money.report.suggestions.types, [{ column: 'amt', suggested: 'decimal', basis: 'decimalText' }],
+                'decimalText fires → suggestions.types carries the pointer entry');
+            assertEq(money.report.columns[0].alternatives, [],
+                'no ranked decimal alternative — decimal is never offered as an alternative reading (§C.4)');
+            assertEq(money.draft.columns.amt.type.name, 'float', 'the draft stays float');
+
+            // non-qualifying #1: mixed fractional-digit count — decimalText cannot fire
+            const mixedK = TV().inferConfig({ headers: ['amt'], rows: [['1.5'], ['2.50']] });
+            assertEq(mixedK.report.suggestions.types, [], 'mixed-scale column: NO suggestions.types entry (not merely "no decimalText reason")');
+            assertEq(mixedK.report.columns[0].alternatives, [], 'no ranked decimal alternative here either');
+            assertEq(mixedK.draft.columns.amt.type.name, 'float', 'the draft stays float');
+
+            // non-qualifying #2: grouping-ambiguous shape — also reads as a grouped integer
+            const ga = TV().inferConfig({ headers: ['amt'], rows: [['1.234'], ['5.678']] });
+            assertEq(ga.report.suggestions.types, [], 'grouping-ambiguous column: NO suggestions.types entry');
+            assert(!ga.report.columns[0].alternatives.some((a) => a.type === 'decimal'),
+                'the grouped-integer alternative this shape DOES carry is never a decimal alternative');
+            assertEq(ga.draft.columns.amt.type.name, 'float', 'the draft stays float');
+        },
+    });
+
+    U.push({
+        suite, name: 'determinism (§C.9) — inferConfig run twice on a money table with TWO qualifying decimalText columns is deep-equal; suggestions.types is ordered by column order',
+        fn: ({ assert, assertEq }) => {
+            const table = { headers: ['price', 'amt'], rows: [['1.50', '10.00'], ['2.00', '20.00'], ['3.25', '30.50']] };
+            const r1 = TV().inferConfig(table);
+            const r2 = TV().inferConfig(table);
+            assertEq(r1, r2, 'two inferConfig() runs over the same (table, options) are deep-equal, including report.suggestions ordering');
+            assertEq(r1.report.suggestions.types,
+                [{ column: 'price', suggested: 'decimal', basis: 'decimalText' }, { column: 'amt', suggested: 'decimal', basis: 'decimalText' }],
+                'BOTH qualifying columns carry an entry, in table column order (price before amt) — not alphabetical, not reversed');
+        },
+    });
+
+    U.push({
         suite, name: 'B027 (§C.4): mixedPadding + twoDigitYear composition — a disambiguated sole yy winner orders reasons [twoDigitYear, mixedPadding], carries no multipleTemporalFormats/alternative',
         needsLuxon: true,
         fn: ({ assert, assertEq }) => {

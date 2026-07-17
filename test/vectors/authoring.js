@@ -91,6 +91,35 @@
     });
 
     U.push({
+        suite, name: 'builder: rule 59 / rule C4 parity (1.6.0) — a decimal column beside sumEquals.exact or comparison.fields.<col>.exact is flagged at AUTHORING time, same path/message as the engine',
+        fn: ({ assert, assertEq }) => {
+            // rule 59: sumEquals.exact forbidden beside a referenced decimal column
+            const META = { schemaVersion: '1.0.0', name: 'dec' };
+            const b59 = TV().createConfigBuilder({ meta: META, columns: { amount: { type: { name: 'decimal' } } } })
+                .addTableCheck({ name: 's', type: 'sumEquals', fields: ['amount'], expectedValue: 1, expectedFieldRow: 'first', exact: true });
+            const a59 = b59.validate();
+            assert(!a59.valid && a59.errors.length === 1, 'builder flags rule 59 at authoring time, before any engine run');
+            assertEq(a59.errors[0].path, 'customTableChecks[0].exact', 'builder error path');
+            const run59 = TV().validate(b59.build(), { headers: ['amount'], rows: [] });
+            assertEq(run59.abortReason, 'schemaInvalid', 'engine agrees: schemaInvalid');
+            assertEq(run59.summary.details[0].context.path, a59.errors[0].path, 'same offending path both ways');
+            assertEq(run59.summary.details[0].context.expected, a59.errors[0].expected, 'same "expected" text both ways (rule 59 named in it)');
+
+            // rule C4: comparison.fields.<col>.exact forbidden on a decimal column
+            const bC4 = TV().createConfigBuilder({ meta: META,
+                columns: { id: { type: { name: 'int' } }, amount: { type: { name: 'decimal' } } } })
+                .setComparison({ match: { keys: ['id'] }, fields: { amount: { exact: true } } });
+            const aC4 = bC4.validate();
+            assert(!aC4.valid && aC4.errors.length === 1, 'builder flags rule C4 at authoring time');
+            assertEq(aC4.errors[0].path, 'comparison.fields.amount.exact', 'builder error path');
+            const runC4 = TV().compare(bC4.build(), { headers: ['id', 'amount'], rows: [] }, { headers: ['id', 'amount'], rows: [] });
+            assertEq(runC4.abortReason, 'schemaInvalid', 'engine agrees: schemaInvalid');
+            assertEq(runC4.summary.details[0].context.path, aC4.errors[0].path, 'same offending path both ways');
+            assertEq(runC4.summary.details[0].context.expected, aC4.errors[0].expected, 'same "expected" text both ways (rule C4 named in it)');
+        },
+    });
+
+    U.push({
         suite, name: 'builder: advisories mirror the §8.2 irrelevantSetting preview',
         fn: ({ assert, assertEq }) => {
             const s = cleanSchema();
