@@ -31,7 +31,7 @@ const VECTOR_FILES = [
     'vectors/schema-phase.js', 'vectors/structural.js', 'vectors/cell.js',
     'vectors/parser-negatives.js', 'vectors/aggregate.js', 'vectors/row-checks.js',
     'vectors/table-checks.js', 'vectors/breakers.js', 'vectors/temporal.js',
-    'vectors/comparison.js', 'vectors/unit.js',
+    'vectors/comparison.js', 'vectors/decimal.js', 'vectors/unit.js',
     'vectors/authoring.js', 'vectors/ingest.js', 'vectors/infer.js',
     'vectors/quality.js', 'vectors/corpus.js', 'vectors/fuzz.js', 'vectors/mutation.js',
     'vectors/console-compiler.js',

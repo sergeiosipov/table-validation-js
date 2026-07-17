@@ -1132,6 +1132,11 @@
             assertEq(money.report.suggestions.patterns,
                 [{ column: 'amt', suggested: '0.00', basis: 'decimals:2,participants:3' }],
                 'the §C.7 pattern suggestion rides beside it (unanimity holds by construction)');
+            assertEq(money.report.suggestions.types,
+                [{ column: 'amt', suggested: 'decimal', basis: 'decimalText' }],
+                'mandatory (§C.8, 1.6.0): the report-only pointer to the first-class decimal type');
+            assertEq(money.draft.columns.amt.type.name, 'float',
+                'the draft is UNCHANGED — decimal is never drafted (§C.4)');
             assertN1(assert, money.draft, 'decimalText');
             // varying fractional-digit count → NO advisory (the predicate needs one uniform scale)
             const mixedK = TV().inferConfig({ headers: ['amt'], rows: [['1.5'], ['2.50']] });

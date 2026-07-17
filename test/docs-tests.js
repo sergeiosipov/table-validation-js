@@ -30,7 +30,7 @@ function coreSpecPath() {
 
 // ---- §12 path → configModel path/section mapping --------------------------------
 
-const TYPE_SECTIONS = ['string', 'int', 'float', 'bool', 'datetime', 'date', 'time', 'categorical', 'skip'];
+const TYPE_SECTIONS = ['string', 'int', 'float', 'decimal', 'bool', 'datetime', 'date', 'time', 'categorical', 'skip'];
 
 function mapDocPath(docPath) {
     // `<type>.<key>` rows (e.g. bool.trueValues) → the type-block descriptor
@@ -240,7 +240,9 @@ function checkSettingsReference(TV) {
         const validMatch = /\*\*Valid\*\*:\s*([^·]+?)\s*(?:·|$)/.exec(line);
         const docRequired = defMatch !== null && defMatch[1].trim() === 'required';
         const validText = validMatch ? validMatch[1].trim() : null;
-        const enumVals = validText ? [...validText.matchAll(/"([^"]*)"/g)].map((mm) => mm[1]) : [];
+        // enum is a SET of valid values; a "(… added in x.y.z)" parenthetical may repeat a
+        // token already listed (e.g. type.name's `"decimal"`), so dedupe before comparing.
+        const enumVals = validText ? [...new Set([...validText.matchAll(/"([^"]*)"/g)].map((mm) => mm[1]))] : [];
 
         for (const p of paths) {
             const target = mapDocPath(p);

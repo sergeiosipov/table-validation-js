@@ -56,7 +56,7 @@ declare namespace TableValidation {
     // Schema (Core §4–§7, §15.3)
     // ================================================================
 
-    type TypeName = 'string' | 'int' | 'float' | 'bool' | 'datetime' | 'date' | 'time' | 'categorical' | 'skip';
+    type TypeName = 'string' | 'int' | 'float' | 'decimal' | 'bool' | 'datetime' | 'date' | 'time' | 'categorical' | 'skip';
 
     interface TypeBlock {
         name: TypeName;
@@ -64,10 +64,12 @@ declare namespace TableValidation {
         length?: Range | null;
         regex?: string | null;
         regexFlags?: string | null;
-        /** int / float: NumberFormat[]; datetime / date / time: format strings */
+        /** int / float / decimal: NumberFormat[]; datetime / date / time: format strings */
         formats?: NumberFormat[] | string[] | null;
+        /** int / float / datetime / date / time; decimal (Core §6.10, added in 1.6.0): text
+         *  cells compare against the bounds in exact decimal, closing float's false-accept edge. */
         value?: Range | null;
-        /** float */
+        /** float / decimal (added in 1.6.0) */
         precision?: Range | null;
         /** bool */
         trueValues?: string[];
@@ -127,7 +129,9 @@ declare namespace TableValidation {
         tolerance?: number;
         /** sumEquals only (Core §7.2, added in 1.5.0): sum decimal-text cells in exact decimal.
          *  Default false = byte-identical to pre-1.5.0. When true, the violation context also
-         *  carries `exact: true` and `binary64FallbackRows: number[]` (native-cell rows). */
+         *  carries `exact: true` and `binary64FallbackRows: number[]` (native-cell rows).
+         *  Rule 59 (1.6.0): MUST be absent when any referenced column is `decimal` — such a
+         *  check always runs in exact mode. */
         exact?: boolean;
         fn?: string;
         params?: object | null;
@@ -169,9 +173,11 @@ declare namespace TableValidation {
                 presence?: 'both' | 'producedOnly' | 'expectedOnly';
                 /** Header the EXPECTED table carries this column under (Core §15.6). */
                 expectedName?: string | null;
+                /** int/float/decimal columns (Core §15.8; `decimal` added in 1.6.0). */
                 tolerance?: ToleranceSpec | null;
                 /** int/float only (Core §15.8, added in 1.5.0): exact-decimal Δ/tolerance
-                 *  arithmetic for text-vs-text pairs. Default false = binary64 (unchanged). */
+                 *  arithmetic for text-vs-text pairs. Default false = binary64 (unchanged).
+                 *  Rule C4 (1.6.0): MUST be absent on a `decimal` column, which is always exact. */
                 exact?: boolean;
                 fuzzy?: CellFuzzySpec | null;
             };
@@ -645,6 +651,10 @@ declare namespace TableValidation {
             tolerances: Array<{ column: string; suggested: number; basis: string }>;
             /** §C.7 (added in 1.4.0): unanimous-evidence NumberFormat `pattern` suggestions for int/float columns — report-only, never drafted. */
             patterns: Array<{ column: string; suggested: string; basis: string }>;
+            /** §C.8 (added in 1.6.0): a report-only pointer to the first-class `decimal` type
+             *  (Core §6.10), emitted for each column whose `decimalText` advisory fired —
+             *  `{ column, suggested: "decimal", basis: "decimalText" }`. The draft is never changed. */
+            types: Array<{ column: string; suggested: string; basis: string }>;
         };
         limitations: string[];
     }
