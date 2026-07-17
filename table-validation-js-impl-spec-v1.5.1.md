@@ -39,8 +39,7 @@ An implementation is conformant to this profile iff it (a) satisfies every norma
 - [5. Implementation Notes](#5-implementation-notes)
 - [6. Repository Layout (no build step)](#6-repository-layout-no-build-step)
 - [7. CDN Publishing](#7-cdn-publishing)
-  - [7.1 Route A: GitHub → jsDelivr (recommended — no toolchain required)](#71-route-a-github--jsdelivr-recommended--no-toolchain-required)
-  - [7.2 Route B: npm → jsDelivr / unpkg (alternative; requires npm)](#72-route-b-npm--jsdelivr--unpkg-alternative-requires-npm)
+  - [7.1 GitHub → jsDelivr (no toolchain required)](#71-github--jsdelivr-no-toolchain-required)
   - [7.3 Versioning & Pinning Policy](#73-versioning--pinning-policy)
   - [7.4 Subresource Integrity](#74-subresource-integrity)
 - [8. Usage Examples](#8-usage-examples)
@@ -432,7 +431,7 @@ TableValidation.inferConfig(table, options?) → { draft, report }   // synchron
 
 ### 3.14 Worker Wrapper & Message Protocol
 
-`dist/table-validation-worker.js` is a small hand-authored **classic worker** script (CDN-fetchable from the same tag). It `importScripts('table-validation.js')` from its own directory at startup and proxies the heavy entry points (the four engines plus the XLSX exporters) over `postMessage`.
+`dist/table-validation-worker.js` is a small hand-authored **classic worker** script (CDN-fetchable from the same tag). It `importScripts('table-validation.js')` from its own directory at startup and proxies the heavy entry points (the four engines) over `postMessage`.
 
 ```javascript
 const w = new Worker('https://cdn.jsdelivr.net/gh/<owner>/table-validation-js@v1.5.1/dist/table-validation-worker.js');
@@ -450,11 +449,6 @@ w.onmessage = (ev) => { /* ev.data = { id: 1, ok: true, result } */ };
 | `compare` | `[schema, produced, expected, options?]` | `ComparisonResult` |
 | `ingest` | `[source, ingestSpec, options?]` | `IngestResult` (`Blob`/`ArrayBuffer` sources are structured-clone-able) |
 | `inferConfig` | `[table, options?]` | `InferenceResult` |
-| `exportXlsx` | `[{ result, table, schema }]` | `Blob` |
-| `exportComparisonXlsx` | `[{ result, table, schema, expected }]` | `Blob` |
-| `exportAnnotatedXlsx` | `[{ result, table, schema }]` | `Blob` |
-
-The export ops require the ExcelJS global inside the worker: their dependency bundles (Luxon/ExcelJS) MUST be `importScripts`'ed into the worker by the consumer via `init` before use; when ExcelJS is absent the op rejects with the same `"ExcelJS global is required"` configuration error the main-thread exporters raise (`name`/`code`/`detail` shape). Returned `Blob`s are structured-clone-safe. The console deliberately does **not** route through these ops yet — it keeps exporting on the main thread (loading ExcelJS inside the worker is a separate SRI/CSP design fork, deferred).
 
 **Structured-clone safety.** Results are sanitized before posting: any non-plain object — e.g. a Luxon `DateTime` carried as an interpreted value in `cellObservations` or diff cells — is rendered to its ISO string (via `.toISO()`) or a `String(...)` fallback for other non-plain objects; plain data passes through unchanged. Results are byte-identical to the main-thread engines except for those interpreted temporal objects.
 
@@ -631,9 +625,9 @@ table-validation/
 
 ## 7. CDN Publishing
 
-CDN publishing is possible and is the intended distribution channel. You do not run your own CDN: you tag a repo (GitHub) or publish a package (npm), and public CDNs serve it.
+CDN publishing is possible and is the intended distribution channel. You do not run your own CDN: you tag a repo (GitHub) and public CDNs serve it.
 
-### 7.1 Route A: GitHub → jsDelivr (recommended — no toolchain required)
+### 7.1 GitHub → jsDelivr (no toolchain required)
 
 jsDelivr serves files straight from GitHub tags; no npm, no node, no registration:
 
@@ -651,37 +645,6 @@ git push --follow-tags
 ```
 
 Requires `dist/` to be committed in the tagged release (it is — the file is the source). Treat published tags as **immutable**: never re-tag changed content under the same version (CDNs cache exact-version URLs permanently). Fixes are new patch tags.
-
-### 7.2 Route B: npm → jsDelivr / unpkg (alternative; requires npm)
-
-Only available from an environment that has npm. Any public npm package is automatically served by jsDelivr and unpkg — no registration with the CDNs, no upload step beyond `npm publish`.
-
-`package.json` (relevant fields):
-
-```json
-{
-    "name": "@yourscope/table-validation",
-    "version": "1.3.0",
-    "description": "Schema-driven table validation & comparison engine (Core Spec 1.3.0, Browser JS profile)",
-    "license": "MIT",
-    "files": ["dist", "README.md"],
-    "main": "dist/table-validation.js",
-    "browser": "dist/table-validation.js",
-    "unpkg": "dist/table-validation.js",
-    "jsdelivr": "dist/table-validation.js",
-    "sideEffects": false,
-    "repository": { "type": "git", "url": "https://github.com/sergeiosipov/table-validation" }
-}
-```
-
-The `unpkg`/`jsdelivr` fields set the default file served for extension-less URLs. Release: `npm version 1.3.0 && npm publish --access public && git push --follow-tags`. Resulting URLs:
-
-```
-https://cdn.jsdelivr.net/npm/@yourscope/table-validation@1.3.0/dist/table-validation.js
-https://unpkg.com/@yourscope/table-validation@1.3.0/dist/table-validation.js
-```
-
-npm gives you a manifest, semver ranges, and provenance — use this route when an npm-capable environment is available. The same immutability rule applies: never republish changed content under the same version.
 
 ### 7.3 Versioning & Pinning Policy
 
