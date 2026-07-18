@@ -1,6 +1,6 @@
 {
   "meta": {
-    "schemaVersion": "1.5.1",
+    "schemaVersion": "1.6.0",
     "name": "orders",
     "description": "Draft inferred from sample data; review before use."
   },
