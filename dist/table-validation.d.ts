@@ -67,7 +67,9 @@ declare namespace TableValidation {
         /** int / float / decimal: NumberFormat[]; datetime / date / time: format strings */
         formats?: NumberFormat[] | string[] | null;
         /** int / float / datetime / date / time; decimal (Core §6.10, added in 1.6.0): text
-         *  cells compare against the bounds in exact decimal, closing float's false-accept edge. */
+         *  cells compare against the bounds in exact decimal, closing float's false-accept edge.
+         *  Rule 60 (1.6.0): on a `decimal` column, non-null `min`/`max` MUST be finite — a
+         *  non-finite number has no decimal image. */
         value?: Range | null;
         /** float / decimal (added in 1.6.0) */
         precision?: Range | null;
@@ -107,6 +109,8 @@ declare namespace TableValidation {
         fieldA?: string;
         fieldB?: string;
         op?: ComparisonOp;
+        /** conditionalRequired condition. Rule 60 (1.6.0): when `field` is a `decimal` column,
+         *  `value` MUST be finite (it supplies a decimal image for the exact comparison). */
         if?: { field: string; op: ComparisonOp; value: unknown };
         then?: { field: string; nonNull: true };
         fields?: string[];
@@ -123,9 +127,12 @@ declare namespace TableValidation {
         direction?: 'increasing' | 'decreasing' | 'nonDecreasing' | 'nonIncreasing';
         start?: number | null;
         fields?: string[];
+        /** sumEquals. Rule 60 (1.6.0): finite when the check runs in exact mode (statically:
+         *  `exact: true`, or any referenced column — summed or `expectedField` — is `decimal`). */
         expectedValue?: number | null;
         expectedField?: string | null;
         expectedFieldRow?: 'first' | 'last' | number;
+        /** sumEquals. Rule 60 (1.6.0): finite when the check runs in exact mode (see `expectedValue`). */
         tolerance?: number;
         /** sumEquals only (Core §7.2, added in 1.5.0): sum decimal-text cells in exact decimal.
          *  Default false = byte-identical to pre-1.5.0. When true, the violation context also

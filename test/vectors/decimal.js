@@ -580,6 +580,124 @@
         assert(!!JSON.stringify(c), 'compare() result JSON.stringify succeeds');
     });
 
+    // ---------------- non-finite numbers on the decimal surfaces (v1.6.0 P3.5) ----------------
+    // JSON-inexpressible (only a programmatic host supplies NaN/±Infinity); before this round
+    // each surface threw an uncaught SyntaxError from decFromNumber (§1.6 violation).
+
+    U('§6.10 pinned exception — a native NaN/±Infinity cell on a decimal column is typeMismatch under strictType true AND false; float accepts it (additivity), no throw', ({ assert, assertEq }) => {
+        for (const cell of [NaN, Infinity, -Infinity]) {
+            for (const strict of [true, false]) {
+                const dec = TV().validate({ meta: META, resultConfig: RC, evaluation: { strictType: strict, timezone: 'utc' },
+                    columns: { a: { type: { name: 'decimal' } } } }, { headers: ['a'], rows: [[cell]] });
+                assert(!dec.valid, `decimal rejects native ${String(cell)} (strictType ${strict})`);
+                assertEq(dec.summary.details[0].ruleName, 'typeMismatch', `${String(cell)} is a typeMismatch (strictType ${strict}) — has no §1.5 decimal image`);
+                const flt = TV().validate({ meta: META, resultConfig: RC, evaluation: { strictType: strict, timezone: 'utc' },
+                    columns: { a: { type: { name: 'float' } } } }, { headers: ['a'], rows: [[cell]] });
+                assert(flt.valid, `float still accepts native ${String(cell)} (strictType ${strict}) — the documented sibling divergence (additivity)`);
+            }
+        }
+    });
+
+    U('rule 60(a) — a decimal value bound of ±Infinity or NaN is schemaInvalid; the same Infinity bound on a float column stays legal (additivity)', ({ assertEq, assert }) => {
+        const R = (b) => Object.assign({ min: null, max: null, minInclusive: true, maxInclusive: true }, b);
+        const bad = (b) => run1({ name: 'decimal', value: R(b) }, ['1.5']);
+        const maxInf = bad({ max: Infinity });
+        assertEq(maxInf.abortReason, 'schemaInvalid', 'a non-finite max has no decimal image (rule 60)');
+        assertEq(maxInf.summary.details[0].context.path, 'columns.a.type.value.max', 'the offending bound path');
+        assertEq(maxInf.summary.details[0].context.expected, 'finite number or null', 'rule-60 message style');
+        assertEq(bad({ min: -Infinity }).abortReason, 'schemaInvalid', '−Infinity min rejected too');
+        assertEq(bad({ max: NaN }).abortReason, 'schemaInvalid', 'NaN bound rejected (already via isNum, kept)');
+        const floatInf = run1({ name: 'float', value: R({ max: Infinity }) }, ['1.5']);
+        assert(floatInf.valid, 'float bounds are binary64 — Infinity stays legal (additivity)');
+    });
+
+    U('rule 60(b) — conditionalRequired if.value ±Infinity on a decimal if.field is schemaInvalid; a float if.field keeps Infinity legal (additivity)', ({ assertEq, assert }) => {
+        const schema = (tn, v) => ({ meta: META, resultConfig: RC, evaluation: LOOSE,
+            columns: { amt: { type: { name: tn } }, note: { nullable: true, type: { name: 'string' } } },
+            customRowChecks: [{ name: 'r', type: 'conditionalRequired', if: { field: 'amt', op: '>', value: v }, then: { field: 'note', nonNull: true } }] });
+        const dec = TV().validate(schema('decimal', Infinity), { headers: ['amt', 'note'], rows: [['1.5', null]] });
+        assertEq(dec.abortReason, 'schemaInvalid', 'a decimal if.field needs a finite literal (rule 60)');
+        assertEq(dec.summary.details[0].context.path, 'customRowChecks[0].if.value', 'the offending path');
+        const flt = TV().validate(schema('float', Infinity), { headers: ['amt', 'note'], rows: [['1.5', null]] });
+        assert(flt.valid, 'a float if.field tolerates an Infinity literal (additivity)');
+    });
+
+    U('rule 60(c) — sumEquals in STATIC exact mode rejects non-finite expectedValue and tolerance; binary64-mode sumEquals keeps Infinity tolerance legal (always-pass, additivity of released garbage)', ({ assertEq, assert }) => {
+        // exact:true (float) — expectedValue Infinity
+        const ev = TV().validate({ meta: META, resultConfig: RC, evaluation: LOOSE, columns: { a: { type: { name: 'float' } } },
+            customTableChecks: [{ name: 's', type: 'sumEquals', fields: ['a'], expectedValue: Infinity, tolerance: 0, exact: true }] },
+            { headers: ['a'], rows: [['1.0']] });
+        assertEq(ev.abortReason, 'schemaInvalid', 'exact:true + non-finite expectedValue → rule 60');
+        assertEq(ev.summary.details[0].context.path, 'customTableChecks[0].expectedValue', 'expectedValue path');
+        // decimal reference (auto-exact) — tolerance Infinity
+        const tol = TV().validate({ meta: META, resultConfig: RC, evaluation: LOOSE, columns: { a: { type: { name: 'decimal' } } },
+            customTableChecks: [{ name: 's', type: 'sumEquals', fields: ['a'], expectedValue: 1.00, tolerance: Infinity }] },
+            { headers: ['a'], rows: [['1.00']] });
+        assertEq(tol.abortReason, 'schemaInvalid', 'decimal-triggered exact mode + Infinity tolerance → rule 60 (was a silent decParse(0) coercion — incoherent)');
+        assertEq(tol.summary.details[0].context.path, 'customTableChecks[0].tolerance', 'tolerance path');
+        // binary64-mode control: no exact, no decimal → Infinity tolerance is legal and always passes
+        const b64 = TV().validate({ meta: META, resultConfig: RC, evaluation: LOOSE, columns: { a: { type: { name: 'float' } } },
+            customTableChecks: [{ name: 's', type: 'sumEquals', fields: ['a'], expectedValue: 1.00, tolerance: Infinity }] },
+            { headers: ['a'], rows: [['999.0']] });
+        assert(b64.valid, 'binary64-mode sumEquals: Infinity tolerance stays legal → always passes (unchanged released semantics)');
+    });
+
+    U('§7.1 mixed pin — a built-in comparison of a decimal field vs a float field with a non-finite native float cell evaluates in binary64 (NaN: ordered/== false, != true; infinities order normally), no crash', ({ assert }) => {
+        const mixed = (op, bcell) => TV().validate({ meta: META, resultConfig: RC, evaluation: LOOSE,
+            columns: { a: { type: { name: 'decimal' } }, b: { type: { name: 'float' } } },
+            customRowChecks: [{ name: 'ab', type: 'comparison', fieldA: 'a', fieldB: 'b', op }] },
+            { headers: ['a', 'b'], rows: [['2.03', bcell]] });
+        for (const op of ['<', '<=', '==', '>=', '>']) {
+            assert(!mixed(op, NaN).valid, `decimal 2.03 ${op} float NaN is false (binary64 NaN comparison) → violation`);
+        }
+        assert(mixed('!=', NaN).valid, 'decimal 2.03 != float NaN is true (the sole NaN-true operator) → no violation');
+        assert(mixed('<', Infinity).valid, '2.03 < +Infinity orders normally (true)');
+        assert(mixed('>', -Infinity).valid, '2.03 > −Infinity orders normally (true)');
+        assert(!mixed('>', Infinity).valid, '2.03 > +Infinity is false → violation');
+    });
+
+    U('§15.8 — compare() exact:true (float) AND a decimal column both evaluate a tolerance-Infinity pair as toleranceMatch with numeric delta/tolerance + exactFallback "binary64" (a 1.5.x crash, corrected)', ({ assertEq }) => {
+        const check = (tn, extraFields) => {
+            const schema = { meta: META, resultConfig: RC, evaluation: LOOSE, structure: { columnMatching: 'byName' },
+                columns: { id: { type: { name: 'int' } }, amount: { type: { name: tn } } },
+                comparison: { match: { keys: ['id'] }, fields: { amount: Object.assign({ tolerance: Infinity }, extraFields) } } };
+            const r = TV().compare(schema, { headers: ['id', 'amount'], rows: [['1', '1.5']] }, { headers: ['id', 'amount'], rows: [['1', '9.9']] });
+            const cd = r.diff.rows[0].cells.amount;
+            assertEq(r.aborted, false, `${tn}: no abort (was SyntaxError in 1.5.x)`);
+            assertEq(cd.tier, 'toleranceMatch', `${tn}: |Δ| ≤ +Infinity → within tolerance`);
+            assertEq(typeof cd.delta, 'number', `${tn}: binary64 numeric delta`);
+            assertEq(cd.tolerance, Infinity, `${tn}: tolerance recorded as the binary64 number`);
+            assertEq(cd.exactFallback, 'binary64', `${tn}: pair discloses the binary64 fallback`);
+        };
+        check('float', { exact: true });   // float exact:true opt-in surface (retro-covered from 1.5.0)
+        check('decimal', {});              // decimal column is always exact (no flag — rule C4)
+    });
+
+    U('§15.8 — a NaN resolved ε classifies no pair within tolerance: a field-form ε driven by a NaN native cell is a valueMismatch with exactFallback "binary64" (no crash); a fn returning NaN is the pre-existing ε-contract violation; a fn returning +Infinity is a fallback toleranceMatch', ({ assertEq }) => {
+        // field-form ε driven by a NaN native cell → NaN ε → valueMismatch, disclosed as binary64
+        const fieldSchema = { meta: META, resultConfig: RC, evaluation: LOOSE, structure: { columnMatching: 'byName' },
+            columns: { id: { type: { name: 'int' } }, tol: { type: { name: 'float' } }, amount: { type: { name: 'float' } } },
+            comparison: { match: { keys: ['id'] }, fields: { amount: { exact: true, tolerance: { field: 'tol', from: 'expected' } } } } };
+        const fr = TV().compare(fieldSchema, { headers: ['id', 'tol', 'amount'], rows: [['1', '0', '1.5']] },
+            { headers: ['id', 'tol', 'amount'], rows: [['1', NaN, '9.9']] });
+        const fc = fr.diff.rows[0].cells.amount;
+        assertEq(fr.aborted, false, 'NaN ε does not crash');
+        assertEq(fc.tier, 'valueMismatch', 'a NaN ε classifies no pair as within tolerance');
+        assertEq(fc.exactFallback, 'binary64', 'the pair is disclosed as a binary64 fallback');
+        // fn ε: +Infinity → fallback toleranceMatch; NaN → the ε contract rejects it (isNum excludes NaN)
+        const fnSchema = { meta: META, resultConfig: RC, evaluation: LOOSE, structure: { columnMatching: 'byName' },
+            columns: { id: { type: { name: 'int' } }, amount: { type: { name: 'float' } } },
+            comparison: { match: { keys: ['id'] }, fields: { amount: { exact: true, tolerance: { fn: 'f' } } } } };
+        const inf = TV().compare(fnSchema, { headers: ['id', 'amount'], rows: [['1', '1.5']] },
+            { headers: ['id', 'amount'], rows: [['1', '9.9']] }, { functions: { f: () => Infinity } });
+        const ic = inf.diff.rows[0].cells.amount;
+        assertEq(ic.tier, 'toleranceMatch', 'fn +Infinity ε → within tolerance (binary64 fallback)');
+        assertEq(ic.exactFallback, 'binary64', 'disclosed as a fallback');
+        const nan = TV().compare(fnSchema, { headers: ['id', 'amount'], rows: [['1', '1.5']] },
+            { headers: ['id', 'amount'], rows: [['1', '9.9']] }, { functions: { f: () => NaN } });
+        assertEq(nan.abortReason, 'customFunctionContractViolation', 'fn NaN is rejected by the ε contract → no pair within tolerance');
+    });
+
     // ---------------- float byte-identical (additivity guard) ----------------
 
     U('float parity — the same config/data on a float column keeps its pre-1.6.0 verdicts', ({ assert }) => {
