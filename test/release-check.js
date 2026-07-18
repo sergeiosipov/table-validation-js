@@ -327,6 +327,17 @@ if (SPEC_DIR) {
         // of M-rules relevant to `configModel` specifically, not the whole M1–M8 set).
         const ALLOWED_PARTIAL_FROM_ONE = new Set(['M1–M5', 'M1-M5']);
 
+        // Historical-narration files record PAST states by nature: the design-decisions
+        // log's release entries quote the very range phrases they narrate updating
+        // ("every 'rules 1–58' phrase became 1–59"), and BACKLOG's superseded-plan
+        // sections snapshot old plans verbatim. A full-range phrase there is provenance,
+        // not a current-state claim, so the claims-full-set staleness note is a category
+        // error for them (2026-07-18 verify-pass ruling); the out-of-bounds check still
+        // applies. Trade-off accepted: a hypothetical LIVE BACKLOG line claiming a full
+        // range would escape this scan until its content reaches a normative doc.
+        const isHistoricalNarration = (label) =>
+            /table-validation-design-decisions-v[\d.]+\.md$|BACKLOG\.md$/.test(label);
+
         for (const { abs, label } of ALL_DOC_FILES) {
             const text = fs.readFileSync(abs, 'utf8');
             const lines = text.split('\n');
@@ -338,7 +349,7 @@ if (SPEC_DIR) {
                     const a = +m[1], b = +m[2];
                     if (maxPlain != null && (a < 1 || b > maxPlain || a > b)) {
                         note(`${label}:${i + 1}: rule range "${m[0]}" out of bounds (actual rules 1–${maxPlain})`);
-                    } else if (a === 1 && maxPlain != null && b !== maxPlain) {
+                    } else if (a === 1 && maxPlain != null && b !== maxPlain && !isHistoricalNarration(label)) {
                         note(`${label}:${i + 1}: rule range "${m[0]}" claims the full set but actual is 1–${maxPlain}`);
                     }
                 }
@@ -348,7 +359,7 @@ if (SPEC_DIR) {
                     if (max == null) continue;
                     if (a < 1 || b > max || a > b) {
                         note(`${label}:${i + 1}: rule range "${m[0]}" out of bounds (actual ${letter}1–${letter}${max})`);
-                    } else if (a === 1 && b !== max && !ALLOWED_PARTIAL_FROM_ONE.has(m[0])) {
+                    } else if (a === 1 && b !== max && !ALLOWED_PARTIAL_FROM_ONE.has(m[0]) && !isHistoricalNarration(label)) {
                         note(`${label}:${i + 1}: rule range "${m[0]}" claims the full set but actual is ${letter}1–${letter}${max}`);
                     }
                 }

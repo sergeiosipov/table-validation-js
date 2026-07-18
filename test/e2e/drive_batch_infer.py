@@ -182,11 +182,15 @@ with sync_playwright() as p:
     assert 'type="list"' in pf and "string,int,float,decimal,bool" in pf and "true,false" in pf, \
         "type/nullable dropdown validations missing (decimal added 1.6.0)"
     # v1.6.0: the per-file metadata block carries the report-only 'suggested type' row (the
-    # §C.8 decimal pointer). Its VALUES stay empty under the pinned v1.5.1 CDN engine (which
-    # predates suggestions.types); the row label is engine-independent and must be present.
+    # §C.8 decimal pointer), populated by the tool's pinned @v1.6.0 CDN engine: clean.csv's
+    # money-shaped `amount` (column D) reads 'decimal'; non-money columns stay empty.
     stype_row = next((r for r in range(2, 20)
                       if cell_text(pf, f"A{r}", shared_list) == "suggested type"), None)
     assert stype_row, "per-file 'suggested type' metadata row label missing"
+    assert cell_text(pf, f"D{stype_row}", shared_list) == "decimal", \
+        f"amount 'suggested type' cell must read 'decimal' (suggestions.types, §C.8): {cell_text(pf, f'D{stype_row}', shared_list)!r}"
+    assert cell_text(pf, f"B{stype_row}", shared_list) in (None, ""), \
+        f"id 'suggested type' cell must be empty (not money-shaped): {cell_text(pf, f'B{stype_row}', shared_list)!r}"
     print(f"[{browser_name}] combined XLSX: Summary-first (autofilter, freeze N2, reasons+tolerance "
           f"columns, amount reasons='decimalText'/tol=0.005, top-freq columns) "
           f"+ 2 file sheets with dropdowns verified")

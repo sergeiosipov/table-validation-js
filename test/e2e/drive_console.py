@@ -319,8 +319,8 @@ with sync_playwright() as p:
 
     # v1.6.0 (§C.8): a uniformly money-shaped column fires the decimalText advisory; the offer
     # must render the report-only decimal-type pointer (suggestions.types) and the pattern
-    # suggestion (suggestions.patterns) as hint lines. The console uses the LOCAL v1.6.0 engine,
-    # so both are populated (unlike the batch tool, still on the pinned v1.5.1 CDN engine).
+    # suggestion (suggestions.patterns) as hint lines. The console uses the LOCAL engine
+    # (the batch tool exercises its own pinned CDN engine — see drive_batch_infer).
     page.evaluate("""async () => {
         const s = window.__tvconsole;
         s.dispatch.pasteText('produced', 'price\\n10.50\\n3.25\\n7.00\\n12.99\\n8.40\\n');
