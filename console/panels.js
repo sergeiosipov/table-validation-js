@@ -6,7 +6,7 @@
     const TV = () => global.TableValidation;
     const h = (...a) => NS.h(...a);
 
-    const TYPE_NAMES = ['string', 'int', 'float', 'bool', 'datetime', 'date', 'time', 'categorical', 'skip'];
+    const TYPE_NAMES = ['string', 'int', 'float', 'decimal', 'bool', 'datetime', 'date', 'time', 'categorical', 'skip'];
     const fmtBytes = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MiB' : n >= 1024 ? (n / 1024).toFixed(1) + ' KiB' : n + ' B';
 
     // Field-rendering context bound to the store (SettingField contract, §5)
@@ -319,7 +319,7 @@
         const optRow = h('div', { class: 'inline-opts' },
             h('label', { class: 'inline' }, 'sampleRows ', h('input', { type: 'text', class: 'narrow', value: String(o.sampleRows), onchange: (e) => store.dispatch.setInferOption('sampleRows', parseInt(e.target.value, 10) || 1000) })),
             h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: o.suggestRanges, onchange: (e) => store.dispatch.setInferOption('suggestRanges', e.target.checked) }), 'suggest ranges'),
-            h('label', { class: 'inline', title: 'Draft observed decimal-precision bounds on float columns (Addendum §C.7; default on — decimal places are contract-like)' },
+            h('label', { class: 'inline', title: 'Draft observed decimal-precision bounds on inferred float columns (Addendum §C.7; default on — decimal places are contract-like). Precision is a shared key of the float and decimal types (Core §6.3/§6.10); decimal is never inferred (§C.4).' },
                 h('input', { type: 'checkbox', checked: o.suggestPrecision, onchange: (e) => store.dispatch.setInferOption('suggestPrecision', e.target.checked) }), 'suggest precision'),
             h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: o.seedComparison, onchange: (e) => store.dispatch.setInferOption('seedComparison', e.target.checked) }), 'seed comparison'),
             h('label', { class: 'inline', title: 'Draft every accepting temporal format (winner first); mixed-format date columns infer via union coverage (Addendum §C.4)' },
@@ -404,6 +404,13 @@
                     h('td', {}, c.candidateKey ? '●' : '')))),
             report.candidateKeys.length ? h('div', { class: 'hint' }, `candidate keys: ${report.candidateKeys.join(', ')}`) : h('div', { class: 'hint' }, 'no single-column key candidate'),
             report.suggestions.tolerances.length ? h('div', { class: 'hint' }, 'suggested tolerances (report-only): ' + report.suggestions.tolerances.map((t) => `${t.column}: ${t.suggested}`).join(', ')) : null,
+            // §C.8 (1.6.0): the report-only decimal-type pointer beside the tolerance line —
+            // the decimal type (Core §6.10) expresses a money-shaped column exactly, no flags.
+            // Adoption is authorial (decimal is never drafted, §C.4), so no one-click button.
+            report.suggestions.types.length ? h('div', { class: 'hint' }, 'suggested types (report-only, §C.8): ' + report.suggestions.types.map((t) => `${t.column} → ${t.suggested}`).join(', ') + ' — the decimal type (Core §6.10) expresses the column contract with exact verdicts, no tolerance machinery') : null,
+            // §C.7 (1.4.0): report-only NumberFormat pattern suggestion(s) — an authorial
+            // spelling contract, never drafted (rule N4), so likewise informational only.
+            report.suggestions.patterns.length ? h('div', { class: 'hint' }, 'suggested patterns (report-only, §C.7): ' + report.suggestions.patterns.map((p) => `${p.column}: ${p.suggested}`).join(', ')) : null,
             adoptionButtons(store, report),
             h('div', {},
                 h('button', { class: 'primary', onclick: accept }, 'Use draft'),
@@ -493,7 +500,7 @@
         const rules = always.slice();
         if (typeName !== 'skip') rules.unshift('typeMismatch');
         if (typeName === 'categorical') rules.unshift('categoryMismatch');
-        if (['string', 'int', 'float', 'datetime', 'date', 'time'].includes(typeName)) rules.unshift('rangeBreach');
+        if (['string', 'int', 'float', 'decimal', 'datetime', 'date', 'time'].includes(typeName)) rules.unshift('rangeBreach');
         if (typeName === 'string') rules.unshift('regexMismatch');
         return rules;
     };
@@ -676,9 +683,10 @@
     // §15.8 ToleranceSpec editor — the four forms (absolute number | {field, from} |
     // {percent, of} | {fn}) as a form selector plus the chosen form's inputs, matching the
     // panel's compound-control convention (cf. rangeControl/smsControl) rather than raw JSON.
-    // Rule C4 gates tolerance to int/float columns; referenced columns (field, of) must be
-    // numeric per rule C5. The {fn} form carries the Advanced-mode deferral hint (rule C5),
-    // matching the diff-checks pattern.
+    // Rule C4 gates tolerance to int/float/decimal columns; the sibling `exact` flag stays
+    // int/float only (a decimal column is always exact — rules 59/C4, so it carries no exact
+    // editor here). Referenced columns (field, of) must be numeric per rule C5. The {fn} form
+    // carries the Advanced-mode deferral hint (rule C5), matching the diff-checks pattern.
     const TOL_FORMS = [
         ['', '(none)'],
         ['absolute', 'absolute (number)'],
@@ -813,7 +821,7 @@
 
         // per-field table (compare / presence / expectedName / tolerance / fuzzy) — §15.3 fields
         const typeOf = (c) => (doc.columns[c].type && doc.columns[c].type.name) || '?';
-        const numericCols = cols.filter((c) => ['int', 'float'].includes(typeOf(c)));
+        const numericCols = cols.filter((c) => ['int', 'float', 'decimal'].includes(typeOf(c)));
         const fieldsCard = h('div', { class: 'card' },
             h('div', { class: 'card-title' }, 'Per-column comparison options'),
             h('table', { class: 'grid' },
@@ -821,7 +829,7 @@
                 cols.map((c) => {
                     const base = `comparison.fields.${c}`;
                     const get = (p) => b.get(p);
-                    const numeric = ['int', 'float'].includes(typeOf(c));
+                    const numeric = ['int', 'float', 'decimal'].includes(typeOf(c));
                     const isStr = typeOf(c) === 'string';
                     return h('tr', {},
                         h('td', {}, c), h('td', {}, typeOf(c)),

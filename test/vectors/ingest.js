@@ -385,6 +385,37 @@
     });
 
     U.push({
+        suite, name: 'normalization (§6.10, 1.6.0) — reformatNumber preserves decimal exactness end to end; promoteNumber destroys it and sumEquals discloses binary64FallbackRows (the §B.8 honesty note)',
+        fn: async ({ assert, assertEq }) => {
+            // reformatNumber: exactness preserved through the working copy, and a decimal
+            // column validates the normalized cell at an EXACT inclusive boundary.
+            const r1 = await TV().ingest([['amount'], ['1.234,50']], { format: 'jsonArrays', header: { mode: 'firstRow' },
+                normalization: { columns: { amount: [{ fn: 'reformatNumber',
+                    params: { format: { decimalSeparator: ',', groupingSeparators: ['.'] } } }] } } });
+            assertEq(r1.table.rows, [['1234.50']], 'reformatNumber emits the §3.5 working copy, lexical precision preserved');
+            const schemaDec = { meta: { schemaVersion: '1.0.0', name: 'dec' }, resultConfig: { collectCellRegister: true },
+                evaluation: { strictType: false, timezone: 'utc' },
+                columns: { amount: { type: { name: 'decimal', value: { min: 1234.50, max: 1234.50, minInclusive: true, maxInclusive: true } } } } };
+            assert(TV().validate(schemaDec, r1.table).valid, 'validation AFTER normalization is exact: the boundary pass proves no precision was lost');
+
+            // promoteNumber: the one built-in that destroys decimal-text exactness — every
+            // promoted cell becomes a native number, so a downstream sumEquals on that
+            // decimal column discloses EVERY row via binary64FallbackRows.
+            const r2 = await TV().ingest([['amount'], ['0.10'], ['0.20']], { format: 'jsonArrays', header: { mode: 'firstRow' },
+                normalization: { columns: { amount: [{ fn: 'promoteNumber', params: null }] } } });
+            assertEq(r2.table.rows, [[0.1], [0.2]], 'promoteNumber emits native numbers');
+            const schemaSum = { meta: { schemaVersion: '1.0.0', name: 'dec' }, resultConfig: { collectCellRegister: true },
+                evaluation: { strictType: false, timezone: 'utc' },
+                columns: { amount: { type: { name: 'decimal' } } },
+                customTableChecks: [{ name: 's', type: 'sumEquals', fields: ['amount'], expectedValue: 1.00, expectedFieldRow: 'first', tolerance: 0 }] };
+            const v2 = TV().validate(schemaSum, r2.table);
+            assert(!v2.valid, 'sum 0.3 ≠ expected 1.00 — a deliberately mismatched expected value so the disclosure context is populated');
+            assertEq(v2.summary.details[0].context.binary64FallbackRows, [0, 1],
+                'both promoted (now-native) rows are disclosed as binary64 fallback contributors — the honesty note, end to end from ingest through sumEquals');
+        },
+    });
+
+    U.push({
         suite, name: 'ingest → validate decoupling: ingest never judges, the engine does',
         fn: async ({ assert, assertEq }) => {
             const r = await TV().ingest('id,amount\n1,not-a-number\n1,2', { format: 'csv' });

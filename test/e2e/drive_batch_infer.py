@@ -89,7 +89,7 @@ with sync_playwright() as p:
     page.goto(url)
     page.wait_for_function("() => !!window.__tvbatch", timeout=60000)
     assert cdn_engine, "engine was not fetched from the pinned CDN tag"
-    assert "v1.5.1" in page.inner_text("#ver"), "engine version banner missing"
+    assert "v1.6.0" in page.inner_text("#ver"), "engine version banner missing"
 
     # ---- multi-file pick: mixed outcomes
     page.set_input_files("#inFiles", [str(tmp / n) for n in
@@ -126,11 +126,11 @@ with sync_playwright() as p:
                      "records.config.json", "records.report.json"], f"zip contents: {names}"
     for n in ("clean.config.json", "records.config.json"):
         cfg = json.loads(z.read(n))
-        assert cfg["meta"]["schemaVersion"] == "1.5.1" and cfg["columns"], f"{n} malformed"
+        assert cfg["meta"]["schemaVersion"] == "1.6.0" and cfg["columns"], f"{n} malformed"
     manifest = json.loads(z.read("manifest.json"))
     mstat = {f["file"]: f["status"] for f in manifest["files"]}
     assert mstat == st, f"manifest disagrees with the UI: {mstat}"
-    assert manifest["files"] and manifest["engineVersion"] == "1.5.1"
+    assert manifest["files"] and manifest["engineVersion"] == "1.6.0"
     failed = next(f for f in manifest["files"] if f["file"] == "broken.xlsx")
     assert failed["error"]["code"] == "formatMismatch", f"manifest error detail: {failed}"
     print(f"[{browser_name}] files mode: 2 inferred, 1 failed, 1 skipped; ZIP verified "
@@ -149,7 +149,7 @@ with sync_playwright() as p:
     assert wbxml.index('name="Summary"') < wbxml.index('name="clean"'), "Summary must be the FIRST sheet"
     shared = x.read("xl/sharedStrings.xml").decode("utf-8")
     for needle in ("inferred type", "format", "precision", "nullable", "confidence", "reasons",
-                   "candidate key", "alternatives", "suggested tolerance", "date", "float",
+                   "candidate key", "alternatives", "suggested tolerance", "suggested type", "date", "float",
                    "yyyy-MM-dd", "North", "top_freq_val_1", "top_freq_val_10"):
         assert needle in shared, f"combined XLSX lacks '{needle}' (metadata block, Summary, or data rows missing)"
     # Summary (first worksheet part): header autofilter over all 23 columns, freeze pane
@@ -179,8 +179,18 @@ with sync_playwright() as p:
     # per-file sheets: data-header autofilter + the type/nullable review dropdowns
     pf = x.read("xl/worksheets/sheet2.xml").decode("utf-8")
     assert "<autoFilter " in pf, "per-file data header autofilter missing"
-    assert 'type="list"' in pf and "string,int,float,bool" in pf and "true,false" in pf, \
-        "type/nullable dropdown validations missing"
+    assert 'type="list"' in pf and "string,int,float,decimal,bool" in pf and "true,false" in pf, \
+        "type/nullable dropdown validations missing (decimal added 1.6.0)"
+    # v1.6.0: the per-file metadata block carries the report-only 'suggested type' row (the
+    # §C.8 decimal pointer), populated by the tool's pinned @v1.6.0 CDN engine: clean.csv's
+    # money-shaped `amount` (column D) reads 'decimal'; non-money columns stay empty.
+    stype_row = next((r for r in range(2, 20)
+                      if cell_text(pf, f"A{r}", shared_list) == "suggested type"), None)
+    assert stype_row, "per-file 'suggested type' metadata row label missing"
+    assert cell_text(pf, f"D{stype_row}", shared_list) == "decimal", \
+        f"amount 'suggested type' cell must read 'decimal' (suggestions.types, §C.8): {cell_text(pf, f'D{stype_row}', shared_list)!r}"
+    assert cell_text(pf, f"B{stype_row}", shared_list) in (None, ""), \
+        f"id 'suggested type' cell must be empty (not money-shaped): {cell_text(pf, f'B{stype_row}', shared_list)!r}"
     print(f"[{browser_name}] combined XLSX: Summary-first (autofilter, freeze N2, reasons+tolerance "
           f"columns, amount reasons='decimalText'/tol=0.005, top-freq columns) "
           f"+ 2 file sheets with dropdowns verified")

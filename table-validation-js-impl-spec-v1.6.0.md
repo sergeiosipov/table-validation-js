@@ -1,6 +1,6 @@
 # Table Validation Engine — Browser JS Implementation Specification
 
-## Document Version: 1.5.1
+## Document Version: 1.6.0
 
 > **Document set.** This document defines the **Browser JS profile** of the *Table Validation Library — Core Specification v1.3.0* (the "Core Spec") and of its *Authoring, Ingestion & Inference Addendum v1.3.0* (the "Addendum", Core Spec §16). All validation and comparison behavior — pipeline, rules, semantics, result structure — is defined there and is not restated here. This document binds the host capabilities of Core Spec §1.6, defines the concrete public API (validation, comparison, and the tooling modules), and specifies packaging and CDN publishing. The doc version, `TableValidation.VERSION`, `TableValidation.SPEC_VERSION`, and the `specVersion` field emitted in every result share **one unified number** (§7.3).
 
@@ -39,8 +39,7 @@ An implementation is conformant to this profile iff it (a) satisfies every norma
 - [5. Implementation Notes](#5-implementation-notes)
 - [6. Repository Layout (no build step)](#6-repository-layout-no-build-step)
 - [7. CDN Publishing](#7-cdn-publishing)
-  - [7.1 Route A: GitHub → jsDelivr (recommended — no toolchain required)](#71-route-a-github--jsdelivr-recommended--no-toolchain-required)
-  - [7.2 Route B: npm → jsDelivr / unpkg (alternative; requires npm)](#72-route-b-npm--jsdelivr--unpkg-alternative-requires-npm)
+  - [7.1 GitHub → jsDelivr (no toolchain required)](#71-github--jsdelivr-no-toolchain-required)
   - [7.3 Versioning & Pinning Policy](#73-versioning--pinning-policy)
   - [7.4 Subresource Integrity](#74-subresource-integrity)
 - [8. Usage Examples](#8-usage-examples)
@@ -62,7 +61,7 @@ An implementation is conformant to this profile iff it (a) satisfies every norma
 | Luxon | `luxon` | all validation/comparison involving `datetime`/`date`/`time` columns, `T+/-N`, timezone handling; the inference temporal ladder (`inferConfig`, §3.13 — absent Luxon skips ladder step 5 and reports it); authoring-time IANA-zone checking (§3.11 — absent Luxon defers rule 4); the `reformatTemporal` normalization built-in (§3.12 — a thrown `TableValidationConfigError` only when a spec actually uses it) | 3.x |
 | ExcelJS | `ExcelJS` | the three exporters (`exportXlsx`, `exportComparisonXlsx`, `exportAnnotatedXlsx`) **and XLSX ingestion** (`ingest` with `format: "xlsx"`, §3.12 — the reader side, §4.8) | 4.x |
 
-The engine core (structure checks, string/int/float/bool/categorical columns, and the comparison pairing/outcome logic — including the native-JS fuzzy metrics of §4.6) MUST work with neither dependency present, as do the builder (§3.11), CSV/TSV/JSON ingestion (§3.12), and the non-temporal inference ladder (§3.13). Dependency presence is checked lazily: a missing `luxon` global is a thrown `TableValidationConfigError` only when a schema actually requires temporal evaluation; a missing `ExcelJS` global only when one of the exporters — or `ingest` with `format: "xlsx"` — is called. The fuzzy metrics of §4.6 are implemented in-library and add **no** new dependency.
+The engine core (structure checks, string/int/float/decimal/bool/categorical columns, and the comparison pairing/outcome logic — including the native-JS fuzzy metrics of §4.6) MUST work with neither dependency present, as do the builder (§3.11), CSV/TSV/JSON ingestion (§3.12), and the non-temporal inference ladder (§3.13). Dependency presence is checked lazily: a missing `luxon` global is a thrown `TableValidationConfigError` only when a schema actually requires temporal evaluation; a missing `ExcelJS` global only when one of the exporters — or `ingest` with `format: "xlsx"` — is called. The fuzzy metrics of §4.6 are implemented in-library and add **no** new dependency.
 
 - **Purity**: per Core Spec §1.6 the engine performs no I/O and never mutates its inputs. The only DOM/browser API used anywhere in the library is `Blob` construction in the exporter.
 
@@ -89,7 +88,7 @@ Load order (Luxon before the engine if temporal columns are used; ExcelJS any ti
 ```html
 <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js"></script> <!-- optional -->
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.5.1/dist/table-validation.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.6.0/dist/table-validation.js"></script>
 <!-- or a plain local copy: <script src="dist/table-validation.js"></script> -->
 ```
 
@@ -363,7 +362,7 @@ b.build()             // AUTHORED (sparse) schema JSON — defaults NOT baked in
 b.resolvedPreview()   // fully-resolved view (defaults + overrides applied) — inspection only
 ```
 
-- **Same rules as the engines** (rule M6): `validate()` applies Core Spec §10 rules 1–58 (plus §15.12 C1–C9 when a `comparison` section is present) and the §8.2 advisory detection, so a builder-clean config never aborts with `abortReason: "schemaInvalid"` at run time.
+- **Same rules as the engines** (rule M6): `validate()` applies Core Spec §10 rules 1–60 (plus §15.12 C1–C9 when a `comparison` section is present) and the §8.2 advisory detection, so a builder-clean config never aborts with `abortReason: "schemaInvalid"` at run time.
 - **Exhaustive errors** (Addendum §A.4 requirement 7): `errors` carries **every independent Phase-1 defect in one pass** — the internal Phase-1 checker runs in accumulate mode for the builder while the engines keep their abort-on-first fast path. `errors[0]` is the violation an engine would abort with; fixing defects one at a time strictly shrinks the list.
 - **Deferred rules, concretely:** rule 30 (custom-function existence) is checked against `options.functions` when supplied, else reported in `deferred` as `"10:30"` (comparison tolerance/diff-check functions likewise defer as `"C5"`/`"C8"`). Rule 4 (IANA-zone validity) is **always checkable in this profile** — via `luxon.IANAZone.isValidZone` when the Luxon global is present, and via the platform `Intl` zone database otherwise — so it never appears in `deferred` here; the deferral mechanism remains defined for profiles without any zone database. Deferred rules are never silently passed.
 - `validate(options)` accepts `{ functions?, intendedUse? }`; `intendedUse` defaults per Addendum §A.6 (`"both"` when a `comparison` section is present, else `"validate"`).
@@ -425,17 +424,17 @@ TableValidation.inferConfig(table, options?) → { draft, report }   // synchron
 
 - `table` — a `TableInput` (Core Spec §1.5), typically `ingest()` output. Not mutated.
 - `options` — `{ sampleRows = 1000, name = "inferred-config", suggestRanges = false, suggestPrecision = true, seedComparison = false, allAcceptingFormats = false, exhaustive = false }` (defaults and rules N2–N3, Addendum §C.10; `suggestPrecision` added in 1.1.0 — drafts observed decimal-precision bounds on float columns, decoupled from `suggestRanges`; `exhaustive` added in 1.2.0 — the sample is the whole table, Addendum §C.2).
-- `draft` is a schema JSON that **passes Phase 1 by construction** (rule N1) and is directly loadable into `createConfigBuilder(draft)` — infer → edit → validate is one flow. `report` is the Addendum §C.8 `InferenceReport` (per-column confidence `high`/`ambiguous`/`fallback`, ranked alternatives, observed evidence, candidate keys, report-only tolerance suggestions).
+- `draft` is a schema JSON that **passes Phase 1 by construction** (rule N1) and is directly loadable into `createConfigBuilder(draft)` — infer → edit → validate is one flow. `report` is the Addendum §C.8 `InferenceReport` (per-column confidence `high`/`ambiguous`/`fallback`, ranked alternatives, observed evidence, candidate keys, and the report-only suggestion family — `suggestions.tolerances`, `suggestions.patterns` (§C.7), and `suggestions.types` (§C.8, added in 1.6.0: the `decimal`-type pointer a `decimalText` column carries)).
 - **Temporal ladder step 5 requires Luxon**: when the `luxon` global is absent the step is skipped entirely (temporal-looking columns fall through to `string`) and `report.limitations` records `"temporalDisabled:luxon"` — deterministic for that binding set (Addendum §C.9), never a throw.
 - Everything else is dependency-free and pure; two calls with the same `(table, options)` return deep-equal results.
 - Throws `TableValidationConfigError` only for caller errors (non-`TableInput` argument, invalid options per N2–N3). The draft itself can never be "invalid data" — inference is a suggestion generator, not a validator.
 
 ### 3.14 Worker Wrapper & Message Protocol
 
-`dist/table-validation-worker.js` is a small hand-authored **classic worker** script (CDN-fetchable from the same tag). It `importScripts('table-validation.js')` from its own directory at startup and proxies the heavy entry points (the four engines plus the XLSX exporters) over `postMessage`.
+`dist/table-validation-worker.js` is a small hand-authored **classic worker** script (CDN-fetchable from the same tag). It `importScripts('table-validation.js')` from its own directory at startup and proxies the heavy entry points (the four engines) over `postMessage`.
 
 ```javascript
-const w = new Worker('https://cdn.jsdelivr.net/gh/<owner>/table-validation-js@v1.5.1/dist/table-validation-worker.js');
+const w = new Worker('https://cdn.jsdelivr.net/gh/<owner>/table-validation-js@v1.6.0/dist/table-validation-worker.js');
 w.postMessage({ id: 1, op: 'validate', args: [schema, table, { referenceInstant }] });
 w.onmessage = (ev) => { /* ev.data = { id: 1, ok: true, result } */ };
 ```
@@ -450,11 +449,6 @@ w.onmessage = (ev) => { /* ev.data = { id: 1, ok: true, result } */ };
 | `compare` | `[schema, produced, expected, options?]` | `ComparisonResult` |
 | `ingest` | `[source, ingestSpec, options?]` | `IngestResult` (`Blob`/`ArrayBuffer` sources are structured-clone-able) |
 | `inferConfig` | `[table, options?]` | `InferenceResult` |
-| `exportXlsx` | `[{ result, table, schema }]` | `Blob` |
-| `exportComparisonXlsx` | `[{ result, table, schema, expected }]` | `Blob` |
-| `exportAnnotatedXlsx` | `[{ result, table, schema }]` | `Blob` |
-
-The export ops require the ExcelJS global inside the worker: their dependency bundles (Luxon/ExcelJS) MUST be `importScripts`'ed into the worker by the consumer via `init` before use; when ExcelJS is absent the op rejects with the same `"ExcelJS global is required"` configuration error the main-thread exporters raise (`name`/`code`/`detail` shape). Returned `Blob`s are structured-clone-safe. The console deliberately does **not** route through these ops yet — it keeps exporting on the main thread (loading ExcelJS inside the worker is a separate SRI/CSP design fork, deferred).
 
 **Structured-clone safety.** Results are sanitized before posting: any non-plain object — e.g. a Luxon `DateTime` carried as an interpreted value in `cellObservations` or diff cells — is rendered to its ISO string (via `.toISO()`) or a `String(...)` fallback for other non-plain objects; plain data passes through unchanged. Results are byte-identical to the main-thread engines except for those interpreted temporal objects.
 
@@ -631,14 +625,14 @@ table-validation/
 
 ## 7. CDN Publishing
 
-CDN publishing is possible and is the intended distribution channel. You do not run your own CDN: you tag a repo (GitHub) or publish a package (npm), and public CDNs serve it.
+CDN publishing is possible and is the intended distribution channel. You do not run your own CDN: you tag a repo (GitHub) and public CDNs serve it.
 
-### 7.1 Route A: GitHub → jsDelivr (recommended — no toolchain required)
+### 7.1 GitHub → jsDelivr (no toolchain required)
 
 jsDelivr serves files straight from GitHub tags; no npm, no node, no registration:
 
 ```
-https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.5.1/dist/table-validation.js
+https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.6.0/dist/table-validation.js
 ```
 
 Release procedure (git only):
@@ -651,37 +645,6 @@ git push --follow-tags
 ```
 
 Requires `dist/` to be committed in the tagged release (it is — the file is the source). Treat published tags as **immutable**: never re-tag changed content under the same version (CDNs cache exact-version URLs permanently). Fixes are new patch tags.
-
-### 7.2 Route B: npm → jsDelivr / unpkg (alternative; requires npm)
-
-Only available from an environment that has npm. Any public npm package is automatically served by jsDelivr and unpkg — no registration with the CDNs, no upload step beyond `npm publish`.
-
-`package.json` (relevant fields):
-
-```json
-{
-    "name": "@yourscope/table-validation",
-    "version": "1.3.0",
-    "description": "Schema-driven table validation & comparison engine (Core Spec 1.3.0, Browser JS profile)",
-    "license": "MIT",
-    "files": ["dist", "README.md"],
-    "main": "dist/table-validation.js",
-    "browser": "dist/table-validation.js",
-    "unpkg": "dist/table-validation.js",
-    "jsdelivr": "dist/table-validation.js",
-    "sideEffects": false,
-    "repository": { "type": "git", "url": "https://github.com/sergeiosipov/table-validation" }
-}
-```
-
-The `unpkg`/`jsdelivr` fields set the default file served for extension-less URLs. Release: `npm version 1.3.0 && npm publish --access public && git push --follow-tags`. Resulting URLs:
-
-```
-https://cdn.jsdelivr.net/npm/@yourscope/table-validation@1.3.0/dist/table-validation.js
-https://unpkg.com/@yourscope/table-validation@1.3.0/dist/table-validation.js
-```
-
-npm gives you a manifest, semver ranges, and provenance — use this route when an npm-capable environment is available. The same immutability rule applies: never republish changed content under the same version.
 
 ### 7.3 Versioning & Pinning Policy
 
@@ -701,7 +664,7 @@ $h = [System.Security.Cryptography.SHA384]::Create().ComputeHash([IO.File]::Read
 ```
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.5.1/dist/table-validation.js"
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.6.0/dist/table-validation.js"
         integrity="sha384-<hash>" crossorigin="anonymous"></script>
 ```
 
@@ -714,7 +677,7 @@ Validate a raw CSV feed (headerless) and export the annotated workbook:
 ```html
 <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.5.1/dist/table-validation.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/sergeiosipov/table-validation-js@v1.6.0/dist/table-validation.js"></script>
 <script>
 const schema = {
     meta: { schemaVersion: "1.3.0", name: "deliveries" },

@@ -66,7 +66,7 @@
     // ---------------- 2. builder build → rebuild identity over random valid configs ----------------
 
     function randomConfig(rnd) {
-        const types = ['string', 'int', 'float', 'bool', 'categorical', 'skip', 'date', 'datetime', 'time'];
+        const types = ['string', 'int', 'float', 'decimal', 'bool', 'categorical', 'skip', 'date', 'datetime', 'time'];
         const TEMPORAL_FORMATS = {
             date: ['yyyy-MM-dd', 'yy-MM-dd'],
             datetime: ['yyyy-MM-dd HH:mm', 'yy-MM-dd HH:mm'],
@@ -87,11 +87,15 @@
             if (t === 'string' && rnd() < 0.3) col.type.regex = '^[a-z]+$';
             if (t === 'int' && rnd() < 0.5) col.type.value = { min: -100, max: 100 + Math.floor(rnd() * 100), minInclusive: true, maxInclusive: true };
             if (t === 'float' && rnd() < 0.4) col.type.precision = { min: 0, max: 2 + Math.floor(rnd() * 4), minInclusive: true, maxInclusive: true };
+            // decimal (Core §6.10, 1.6.0): float-parity keys — value/precision Ranges exercise
+            // exact-range resolution + round-trip; the self-accepting invariant stays green.
+            if (t === 'decimal' && rnd() < 0.4) col.type.precision = { min: 0, max: 2 + Math.floor(rnd() * 4), minInclusive: true, maxInclusive: true };
+            if (t === 'decimal' && rnd() < 0.5) col.type.value = { min: -100, max: 100 + Math.floor(rnd() * 100), minInclusive: true, maxInclusive: true };
             if (t === 'categorical') col.type.allowedValues = ['A', 'B', 'C'].slice(0, 1 + Math.floor(rnd() * 3));
             // 1.3.0 NumberFormat union on numerics: negativeStyle / pattern / allowBareDecimal
             // (each round-trips through build→rebuild; grouping/decimal separators are declared so
             //  a chosen pattern only ever uses the four allowed symbols — see rule 12)
-            if ((t === 'int' || t === 'float') && rnd() < 0.4) {
+            if ((t === 'int' || t === 'float' || t === 'decimal') && rnd() < 0.4) {
                 const fmt = { decimalSeparator: '.', groupingSeparators: [','] };
                 const k = rnd();
                 if (k < 0.34) {

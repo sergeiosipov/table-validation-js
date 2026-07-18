@@ -18,7 +18,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..');
-const CORE_SPEC = 'table-validation-core-spec-v1.5.1.md';
+const CORE_SPEC = 'table-validation-core-spec-v1.6.0.md';
 
 function coreSpecPath() {
     const candidates = [ROOT, process.env.TV_SPEC_DIR, path.join(ROOT, '..', 'table-validation-spec')];
@@ -30,7 +30,7 @@ function coreSpecPath() {
 
 // ---- §12 path → configModel path/section mapping --------------------------------
 
-const TYPE_SECTIONS = ['string', 'int', 'float', 'bool', 'datetime', 'date', 'time', 'categorical', 'skip'];
+const TYPE_SECTIONS = ['string', 'int', 'float', 'decimal', 'bool', 'datetime', 'date', 'time', 'categorical', 'skip'];
 
 function mapDocPath(docPath) {
     // `<type>.<key>` rows (e.g. bool.trueValues) → the type-block descriptor
@@ -240,7 +240,9 @@ function checkSettingsReference(TV) {
         const validMatch = /\*\*Valid\*\*:\s*([^·]+?)\s*(?:·|$)/.exec(line);
         const docRequired = defMatch !== null && defMatch[1].trim() === 'required';
         const validText = validMatch ? validMatch[1].trim() : null;
-        const enumVals = validText ? [...validText.matchAll(/"([^"]*)"/g)].map((mm) => mm[1]) : [];
+        // enum is a SET of valid values; a "(… added in x.y.z)" parenthetical may repeat a
+        // token already listed (e.g. type.name's `"decimal"`), so dedupe before comparing.
+        const enumVals = validText ? [...new Set([...validText.matchAll(/"([^"]*)"/g)].map((mm) => mm[1]))] : [];
 
         for (const p of paths) {
             const target = mapDocPath(p);
@@ -277,7 +279,7 @@ function checkSettingsReference(TV) {
 
 function runUsageExamples(TV) {
     const errs = [];
-    const md = fs.readFileSync(path.join(ROOT, 'table-validation-js-impl-spec-v1.5.1.md'), 'utf8');
+    const md = fs.readFileSync(path.join(ROOT, 'table-validation-js-impl-spec-v1.6.0.md'), 'utf8');
     const sec8 = md.split('## 8. Usage Examples')[1].split('## 9.')[0];
     const blocks = [];
     const re = /```html\n([\s\S]*?)```/g;

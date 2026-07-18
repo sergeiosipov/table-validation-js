@@ -4,7 +4,7 @@ A task-oriented guide to the console for analysts and data stewards. No programm
 required: everything in this guide happens in the browser, with the mouse and a few
 JSON snippets you can copy verbatim.
 
-*This guide covers console and library version 1.5.1. Screenshots are generated from the
+*This guide covers console and library version 1.6.0. Screenshots are generated from the
 committed example files by [`make-screenshots.py`](make-screenshots.py) — if the console
 changes, rerun that script and the images regenerate exactly.*
 
@@ -267,8 +267,8 @@ because uniqueness isn't enabled on that column.
 ![The order_date column editor: type.name select set to date, the date settings block with formats ["yyyy-MM-dd"] and a value range, column settings with nullable false and severity {"byRule":{"typeMismatch":"warning"}}, and dimmed irrelevant settings with their reasons.](img/06-column-editor.png)
 
 The type select comes first; the block below it swaps to that type's settings (formats
-and value range for a date; regex for a string; precision for a float; allowed values
-for a categorical). An **int or float column also carries a `formats` list** — the
+and value range for a date; regex for a string; precision for a float or decimal; allowed
+values for a categorical). An **int, float, or decimal column also carries a `formats` list** — the
 NumberFormat array that lets it accept regional spellings, accounting negatives and
 spelling contracts; chapter 9 covers it in full, including the **from example** box that
 compiles a format from a sample value you type. Constraints — `nullable`, `unique`,
@@ -529,17 +529,21 @@ codes you can search this guide for:
   decimals (`12.34`, `5.60`, `100.00`). Unlike the ambiguity reasons above it never demotes a
   column — a `high` column stays `high`, and this is the only reason that ever rides *alongside*
   `high`. It is a nudge, not a doubt: when it fires the report hands you the decimal-scale
-  **tolerance** it computes (`0.005` for two decimals) and the spelling **pattern** (`0.00`), so
-  you can pin them before summing or comparing — see *Money and decimal precision* below
-  (Addendum §C.8).
+  **tolerance** it computes (`0.005` for two decimals), the spelling **pattern** (`0.00`), and
+  — new in 1.6.0 — a **type** pointer at the first-class `decimal` type (Core §6.10), which
+  expresses this exact-money contract with no tolerance machinery at all. You can pin them
+  before summing or comparing — see *Money and decimal precision* below (Addendum §C.8).
 
-Two report-only extras never touch the draft. **Suggested tolerances** appear as the
-adoption chips above; **suggested patterns** (new in 1.4.0) — a spelling like `#,##0.00`
-inferred when every value in an int/float column shares the same decimal-digit count and
-grouping — appear only in the offer's downloadable **inference report** (the *Download
-report* button, under `suggestions.patterns`), never as a chip and never in the draft: a
-pattern is an authorial contract, not observable evidence, so inference proposes it for you
-to add by hand (§9's number-formats section), never bakes it in (Addendum §C.7).
+Three report-only extras never touch the draft. **Suggested tolerances** appear as the
+adoption chips above (and as an offer hint line); **suggested patterns** (new in 1.4.0) — a
+spelling like `#,##0.00` inferred when every value in an int/float column shares the same
+decimal-digit count and grouping — and **suggested types** (new in 1.6.0) — the `decimal`
+pointer a `decimalText` column always carries — appear as offer hint lines and in the
+downloadable **inference report** (the *Download report* button, under `suggestions.patterns`
+/ `suggestions.types`), but never as an adoption chip and never in the draft: a pattern is an
+authorial contract and `decimal` is an authorial opt-in, so inference proposes them for you
+to add by hand (§9's number-formats section; *Money and decimal precision* below), never
+bakes them in (Addendum §C.7/§C.8).
 
 **Inference can also conclude `categorical`.** A low-cardinality text column — at least 20
 sampled rows, no more than 12 distinct values, and distinct/rows ≤ 0.2 — infers
@@ -629,6 +633,37 @@ falls back to binary64 for that pair or row, and the result records which rows f
 column is uniformly money-shaped, the inference offer flags it with the `decimalText` advisory
 (above) and hands you the decimal-scale tolerance and pattern to pin before you turn either
 switch on.
+
+### Authoring a `decimal` column: `decimal` vs `float` + `exact`
+
+The 1.5.0 switches above are opt-in patches to `float`. Version 1.6.0 adds the alternative a
+money column usually wants outright: the first-class **`decimal`** type (core spec §6.10). It
+has the *same* acceptance contract as `float` — the same `formats`, the same lexical
+`precision`, the same regional-spelling and bare-decimal support — but **every** text-cell
+verdict is exact decimal, with no flags to remember. Value ranges, `sumEquals`, the built-in
+comparison / uniqueness / monotonic checks, and `compare()`'s equality and tolerance all
+compare text cells in exact decimal; the type name *is* the opt-in.
+
+- **Reach for `decimal` by default for money.** `{ "type": { "name": "decimal", "precision": {
+  "min": 2, "max": 2 } } }` gives you exact ranges, exact sums, and exact compares on the amount
+  column with nothing else to configure: `"0.3000000000000000001"` breaches `max: 0.3`, ten
+  `"0.10"` cells sum to exactly `1.00`, and two distinct amounts above 2⁵³ never collide.
+- **Reach for `float` + `exact: true` when you must stay `float`.** If a column is already
+  `float` for other reasons and you only need exactness at the sum or the comparison, the
+  targeted `sumEquals` `exact: true` and `comparison.fields.<col>.exact: true` opt-ins (above)
+  are still the tool — they leave `float`'s binary64 value-range behaviour untouched. Declaring
+  either `exact` flag *on* a `decimal` column is a schema error: a decimal column is already
+  exact everywhere (rules 59 / C4).
+
+**One caveat unique to `decimal`.** A **native** number cell that is not finite — `NaN`,
+`+Infinity`, `-Infinity`, which only a programmatic host (never JSON or a text feed) can
+supply — is a `typeMismatch` on a `decimal` column, because it has no decimal image. `float`
+still accepts non-finite natives; this is the one place the two siblings diverge (core spec §6.10).
+
+Inference never drafts `decimal` — a decimal-text column still infers `float`, and the
+`decimalText` advisory's `suggestions.types` pointer (*Reading the offer* above) is how the offer
+nudges you toward it. Adopting `decimal` is always a deliberate edit: pick it in the type select,
+or write it into the config by hand.
 
 ### Two-digit years and the century pivot
 
@@ -803,7 +838,7 @@ The mess → what to do in the console:
 | Duplicate match keys in a comparison | `onDuplicateKey: reportAndExclude` — one error per key group, rows set aside, run continues | [7](#7-comparing-two-tables) |
 | The golden file names the column differently | *expected header (alias)* on the column's comparison options | [7](#7-comparing-two-tables) |
 | Cent-level rounding differences | *tolerance* on the numeric column (inference suggests one) | [7](#7-comparing-two-tables), [9](#9-power-features) |
-| Money sums/compares off by a cent (ten `0.10` cells ≠ `1.00`) | `float` acceptance is lexical, but `sumEquals`/`compare()` do binary64 math; set `exact: true` (new in 1.5.0, opt-in, default off) for exact-decimal sums and comparisons on decimal-text feeds | [9](#9-power-features) |
+| Money sums/compares off by a cent (ten `0.10` cells ≠ `1.00`) | use the **`decimal`** type (new in 1.6.0) — exact ranges, sums, and compares with no flags; or keep `float` and set `exact: true` (new in 1.5.0, opt-in, default off) on `sumEquals`/`compare()` for exact-decimal math on decimal-text feeds | [9](#9-power-features) |
 | Amounts must keep exactly N decimals | *suggest precision* (on by default) drafts the observed bounds | [9](#9-power-features) |
 | Decimals without a leading zero (`.85`) | inference drafts a NumberFormat with `allowBareDecimal` — validation reads `.85` as `0.85` | [9](#9-power-features) |
 | Accounting negatives (`(1,234.50)`) or SAP trailing minus (`1234.50-`) | inference drafts a NumberFormat with `negativeStyle` — validation reads both as `-1234.50`; a column mixing `-x` and `(x)` takes two formats in the array | [9](#9-power-features) |
@@ -821,8 +856,8 @@ The mess → what to do in the console:
 | "Why is this button disabled?" | hover it — every disabled control in the console carries its reason | [2](#2-getting-started), [4](#4-reading-results) |
 
 Deeper reading: the [README](../README.md) (library overview and the messy-data
-cookbook) and the [console architecture](../table-validation-ui-architecture-v1.5.1.md)
+cookbook) and the [console architecture](../table-validation-ui-architecture-v1.6.0.md)
 (§11 maps every library capability to its place in the UI) live in this repository; the
-[core specification](https://github.com/sergeiosipov/table-validation-spec/blob/v1.5.1/table-validation-core-spec-v1.5.1.md)
+[core specification](https://github.com/sergeiosipov/table-validation-spec/blob/v1.6.0/table-validation-core-spec-v1.6.0.md)
 (the exact meaning of every check and verdict) lives in the companion
 `table-validation-spec` repository.

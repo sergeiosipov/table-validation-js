@@ -638,7 +638,7 @@
     });
 
     V({
-        name: 'rule 39: sumEquals referenced column must be int/float',
+        name: 'rule 39: sumEquals referenced column must be int/float/decimal',
         schema: {
             meta: { schemaVersion: '1.0.0', name: 't' },
             columns: { a: { type: { name: 'string' } }, b: { type: { name: 'int' } } },
@@ -650,14 +650,14 @@
             summary: {
                 details: [{
                     ruleName: 'schemaValidationError',
-                    context: { path: 'customTableChecks[0].fields[0]', expected: 'int or float column', actual: 'string' },
+                    context: { path: 'customTableChecks[0].fields[0]', expected: 'int, float, or decimal column', actual: 'string' },
                 }],
             },
         },
     });
 
     V({
-        name: 'rule 40: monotonic referenced column type must be in {int,float,string,datetime,date,time}',
+        name: 'rule 40: monotonic referenced column type must be in {int,float,decimal,string,datetime,date,time}',
         schema: {
             meta: { schemaVersion: '1.0.0', name: 't' },
             columns: { a: { type: { name: 'bool' } } },
@@ -671,7 +671,7 @@
                     ruleName: 'schemaValidationError',
                     context: {
                         path: 'customTableChecks[0].field',
-                        expected: 'column of type int, float, string, datetime, date, or time',
+                        expected: 'column of type int, float, decimal, string, datetime, date, or time',
                         actual: 'bool',
                     },
                 }],
