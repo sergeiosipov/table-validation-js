@@ -149,7 +149,7 @@ with sync_playwright() as p:
     assert wbxml.index('name="Summary"') < wbxml.index('name="clean"'), "Summary must be the FIRST sheet"
     shared = x.read("xl/sharedStrings.xml").decode("utf-8")
     for needle in ("inferred type", "format", "precision", "nullable", "confidence", "reasons",
-                   "candidate key", "alternatives", "suggested tolerance", "date", "float",
+                   "candidate key", "alternatives", "suggested tolerance", "suggested type", "date", "float",
                    "yyyy-MM-dd", "North", "top_freq_val_1", "top_freq_val_10"):
         assert needle in shared, f"combined XLSX lacks '{needle}' (metadata block, Summary, or data rows missing)"
     # Summary (first worksheet part): header autofilter over all 23 columns, freeze pane
@@ -179,8 +179,14 @@ with sync_playwright() as p:
     # per-file sheets: data-header autofilter + the type/nullable review dropdowns
     pf = x.read("xl/worksheets/sheet2.xml").decode("utf-8")
     assert "<autoFilter " in pf, "per-file data header autofilter missing"
-    assert 'type="list"' in pf and "string,int,float,bool" in pf and "true,false" in pf, \
-        "type/nullable dropdown validations missing"
+    assert 'type="list"' in pf and "string,int,float,decimal,bool" in pf and "true,false" in pf, \
+        "type/nullable dropdown validations missing (decimal added 1.6.0)"
+    # v1.6.0: the per-file metadata block carries the report-only 'suggested type' row (the
+    # §C.8 decimal pointer). Its VALUES stay empty under the pinned v1.5.1 CDN engine (which
+    # predates suggestions.types); the row label is engine-independent and must be present.
+    stype_row = next((r for r in range(2, 20)
+                      if cell_text(pf, f"A{r}", shared_list) == "suggested type"), None)
+    assert stype_row, "per-file 'suggested type' metadata row label missing"
     print(f"[{browser_name}] combined XLSX: Summary-first (autofilter, freeze N2, reasons+tolerance "
           f"columns, amount reasons='decimalText'/tol=0.005, top-freq columns) "
           f"+ 2 file sheets with dropdowns verified")

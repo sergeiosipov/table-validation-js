@@ -286,6 +286,14 @@
             + (report.limitations && report.limitations.length ? ` · limitations: ${report.limitations.join(', ')}` : '');
     }
 
+    // §C.8 (1.6.0): the report-only decimal-type pointer(s), joined for display — shared by
+    // the per-file metadata block and the in-page evidence disclosure. suggestions.types is a
+    // v1.6.0-engine field, absent under an older pinned engine, so it is read defensively.
+    function typesText(report) {
+        return ((report.suggestions && report.suggestions.types) || [])
+            .map((t) => `${t.column} → ${t.suggested}`).join(', ');
+    }
+
     function sheetNameFor(relPath, usedNames) {
         let base = (stemOf(relPath).split('/').pop() || 'sheet').replace(/[\[\]*?:\/\\]/g, '_').slice(0, 28) || 'sheet';
         let name = base, n = 2;
@@ -315,6 +323,7 @@
     const XLSX_TOPN = 10;
     function colRecordsFor(e) {
         const tolerances = (e.report.suggestions && e.report.suggestions.tolerances) || [];
+        const types = (e.report.suggestions && e.report.suggestions.types) || [];   // §C.8 (1.6.0), engine-gated
         return e.report.columns.map((c, ci) => {
             const d = e.draft.columns[c.name];
             const tol = tolerances.find((t) => t.column === c.name);
@@ -347,6 +356,7 @@
                 alternatives: c.alternatives
                     .map((a) => a.type + (a.formats ? ' ' + a.formats.join('|') : '')).join(', '),
                 suggestedTolerance: tol ? String(tol.suggested) : '',
+                suggestedType: (types.find((t) => t.column === c.name) || {}).suggested || '',   // §C.8 pointer (1.6.0)
                 topFreq,
             };
         });
@@ -425,6 +435,9 @@
                 ['candidate key', colRecs.map((x) => x.key)],
                 ['alternatives', colRecs.map((x) => x.alternatives)],
                 ['suggested tolerance', colRecs.map((x) => x.suggestedTolerance)],
+                // §C.8 (1.6.0): the decimal-type pointer, per-file only — the Summary's reasons
+                // column already carries `decimalText`, so no new Summary column is introduced.
+                ['suggested type', colRecs.map((x) => x.suggestedType)],
             ];
             for (const [label, values] of meta) ws.addRow([label, ...values]);
             ws.addRow([]);
@@ -451,7 +464,7 @@
             const nullableRowN = rowOf('nullable');
             cols.forEach((c, i) => {
                 ws.getRow(typeRowN).getCell(i + 2).dataValidation =
-                    listValidation(['string', 'int', 'float', 'bool', 'datetime', 'date', 'time', 'categorical', 'skip']);
+                    listValidation(['string', 'int', 'float', 'decimal', 'bool', 'datetime', 'date', 'time', 'categorical', 'skip']);
                 ws.getRow(nullableRowN).getCell(i + 2).dataValidation = listValidation(['true', 'false']);
             });
 
@@ -522,7 +535,8 @@
             + `<td>${c.observed.nulls}</td><td>${c.observed.distinctCount}</td><td>${c.candidateKey ? '●' : ''}</td></tr>`).join('');
         return `<table class="grid"><tr><th>column</th><th>type</th><th>confidence</th><th>reasons</th><th>nulls</th><th>distinct</th><th>key?</th></tr>${rows}</table>`
             + `<div class="hint">sampled ${e.report.sample.rowsSampled} of ${e.report.sample.rowsAvailable} rows${esc(disclosure(e.report))}`
-            + (e.report.candidateKeys.length ? ` · candidate keys: ${esc(e.report.candidateKeys.join(', '))}` : ' · no single-column key candidate') + '</div>';
+            + (e.report.candidateKeys.length ? ` · candidate keys: ${esc(e.report.candidateKeys.join(', '))}` : ' · no single-column key candidate')
+            + (typesText(e.report) ? ` · suggested types (report-only, §6.10): ${esc(typesText(e.report))}` : '') + '</div>';
     }
 
     const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

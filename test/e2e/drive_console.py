@@ -227,6 +227,13 @@ with sync_playwright() as p:
         s.dispatch.selectSchema('_columns', 'qty');
     }""")
     page.wait_for_selector(".card-title input.narrow")
+    # v1.6.0: the column type select carries `decimal` (panels.js TYPE_NAMES)
+    type_opts = page.evaluate("""() => {
+        const sel = [...document.querySelectorAll('.detail select')].find((s) =>
+            [...s.options].some((o) => o.value === 'float') && [...s.options].some((o) => o.value === 'string'));
+        return sel ? [...sel.options].map((o) => o.value) : null;
+    }""")
+    assert type_opts and 'decimal' in type_opts, f"column type select missing 'decimal' (TYPE_NAMES): {type_opts}"
     page.locator(".card-title input.narrow").first.fill("a.b")
     page.get_by_role("button", name="rename").click()
     page.evaluate("""() => {
@@ -309,6 +316,31 @@ with sync_playwright() as p:
             throw new Error('{percent, of} form did not round-trip into the active config: ' + JSON.stringify(t));
         }
     }""")
+
+    # v1.6.0 (§C.8): a uniformly money-shaped column fires the decimalText advisory; the offer
+    # must render the report-only decimal-type pointer (suggestions.types) and the pattern
+    # suggestion (suggestions.patterns) as hint lines. The console uses the LOCAL v1.6.0 engine,
+    # so both are populated (unlike the batch tool, still on the pinned v1.5.1 CDN engine).
+    page.evaluate("""async () => {
+        const s = window.__tvconsole;
+        s.dispatch.pasteText('produced', 'price\\n10.50\\n3.25\\n7.00\\n12.99\\n8.40\\n');
+        await s.dispatch.ingest('produced');
+        if (s.state.data.produced.status !== 'ready') throw new Error('money ingest failed: ' + JSON.stringify(s.state.data.produced.error));
+        s.dispatch.inferRun();
+        if (s.state.inference.status !== 'offered') throw new Error('no inference offer for the money column');
+        const rep = s.state.inference.offer.report;
+        const price = rep.columns.find((c) => c.name === 'price');
+        if (!price || !price.reasons.includes('decimalText')) throw new Error('decimalText did not fire: ' + JSON.stringify(price && price.reasons));
+        if (!rep.suggestions.types.some((t) => t.column === 'price' && t.suggested === 'decimal')) throw new Error('suggestions.types missing the decimal pointer: ' + JSON.stringify(rep.suggestions.types));
+        if (!rep.suggestions.patterns.some((p) => p.column === 'price')) throw new Error('suggestions.patterns missing: ' + JSON.stringify(rep.suggestions.patterns));
+        s.dispatch.setTab('data');
+    }""")
+    page.wait_for_timeout(200)
+    offer_text = page.locator(".offer").inner_text()
+    assert "suggested types" in offer_text and "decimal" in offer_text, \
+        f"offer lacks the suggested-types hint (§C.8): {offer_text[:400]}"
+    assert "suggested patterns" in offer_text, \
+        f"offer lacks the suggested-patterns hint (§C.7): {offer_text[:400]}"
 
     page.wait_for_timeout(200)
     browser.close()

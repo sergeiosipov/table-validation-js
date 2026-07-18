@@ -133,7 +133,7 @@ recalibration, honest fallback confidence labels, the console's example-to-forma
 compiler, and a batch-tool review workbook with autofilter, auto-width, and
 type/nullable dropdowns.
 
-The engine core (structure, string/int/float/bool/categorical columns) works with neither
+The engine core (structure, string/int/float/decimal/bool/categorical columns) works with neither
 dependency present. A missing `luxon` only throws when a schema actually declares temporal
 columns; a missing `ExcelJS` only when `exportXlsx` is called.
 
@@ -213,8 +213,8 @@ normalization, §C for inference):
 | **Report titles / metadata above the header; totals rows below** | `IngestSpec.skipRows` / `skipFooterRows` (Addendum §B.4) — actual dropped counts land in provenance |
 | **Merged / blank repeating keys** (un-pivoting: region written once per block) | normalization `fillDown` (per-column; `treatAsEmpty` for `"-"`-style placeholders) |
 | **NBSP, en/em dashes, curly quotes** (Word/Excel artifacts) | normalization `replaceChars` with an exact substitution map |
-| **Regional number separators** (`1.234,50`, `1 234,50`) — and **bare decimals** (`.85`) | `formats: [NumberFormat]` on int/float columns (accept without transforming; `allowBareDecimal: true` for `.85`-style values), or normalization `reformatNumber` (canonicalize; `.85` → `0.85`, lexical precision preserved) |
-| **Money sums / compares off by a cent** (ten `"0.10"` cells ≠ `1.00`) | `float` is a decimal-*text* contract — acceptance and `precision` are lexical (character counts on the string as written; no binary64). Binary64 enters verdict math only at three touchpoints: `value` range bounds, the `sumEquals` table check, and `compare()`'s equality/tolerance (Core Spec §6.3). For decimal-text money feeds, opt in to exact-decimal arithmetic via `sumEquals`' `exact: true` (§7.2) and a comparison column's `exact: true` (§15.8) — added in 1.5.0, default off, native (Excel-ingested) number cells fall back to binary64 and the result records it |
+| **Regional number separators** (`1.234,50`, `1 234,50`) — and **bare decimals** (`.85`) | `formats: [NumberFormat]` on int/float/decimal columns (accept without transforming; `allowBareDecimal: true` for `.85`-style values), or normalization `reformatNumber` (canonicalize; `.85` → `0.85`, lexical precision preserved) |
+| **Money sums / compares off by a cent** (ten `"0.10"` cells ≠ `1.00`) | Use the first-class **`decimal`** type (Core Spec §6.10, added in 1.6.0): the same acceptance contract as `float`, but **every** text-cell verdict — `value` ranges, `sumEquals`, `compare()` equality/tolerance — is exact decimal, with no opt-in flags (the type name *is* the opt-in). To keep `float` semantics with targeted exactness instead, `float` stays a decimal-*text* contract (acceptance and `precision` are lexical character counts; no binary64) where binary64 enters verdict math only at three touchpoints — `value` range bounds, the `sumEquals` table check, and `compare()`'s equality/tolerance (Core Spec §6.3) — two of which take an opt-in `exact: true` (§7.2, §15.8; added in 1.5.0, default off). Under either, native (Excel-ingested) number cells fall back to binary64 and the result records it |
 | **Mixed date spellings in one column** (`2026-07-15` next to `16.07.2026`) | list several `formats` on the temporal column — or let inference draft them with `inferConfig(…, { allAcceptingFormats: true })` (Addendum §C.4 union coverage) |
 | **Null-token zoos** (`NA`, `N/A`, `null`, `-`, `""`) | `nullHandling.nullEquivalents` (recognition, no rewriting); inference adopts observed tokens into its draft; normalization `nullCoerce` when you want real nulls in the output |
 | **Duplicate headers** | `structure.duplicateColumnNames.strategy` (`halt` / `rename` / `keepFirst`) |
